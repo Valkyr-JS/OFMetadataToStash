@@ -780,7 +780,7 @@ function Add-MetadataUsingOFDB{
              
             if (!(DatabaseHasAlreadyBeenImported)){
                 #Select all the media (except audio) and the text the performer associated to them, if available from the OFDB
-                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
+                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.api_type, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.api_type, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
                 $OF_DBpath = $currentdatabase.fullname 
                 $OFDBQueryResult = Invoke-SqliteQuery -Query $Query -DataSource $OF_DBpath
 
@@ -981,7 +981,14 @@ function Add-MetadataUsingOFDB{
                         }
     
                         #Creating the title we want for the media, and defining Stash details for this media.
-                        $proposedtitle = "$performername - $creationdatefromOF"
+                        $postID = $OFDBMedia.post_ID
+
+                        # Set the post type
+                        $postType = $OFDBMedia.api_type
+                        if($OFDBMedia.api_type -eq "Messages") { $postType = "Message" }
+                        elseif($OFDBMedia.api_type -eq "Posts") { $postType = "Post" }
+
+                        $proposedtitle = "$performername | $postID | $postType"
                         $detailsToAddToStash = $OFDBMedia.text
     
                         
