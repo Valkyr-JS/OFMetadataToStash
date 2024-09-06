@@ -806,9 +806,7 @@ function Add-MetadataUsingOFDB{
     
                     #Storing separate variants of these variables with apostrophy and backslash sanitization so they don't ruin our SQL/GQL queries
                     $OFDBfilenameForQuery = $OFDBfilename.replace("'","''") 
-                    $OFDBdirectoryForQuery = $OFDBdirectory.replace("'","''") 
                     $OFDBfilenameForQuery = $OFDBfilename.replace("\","\\") 
-                    $OFDBdirectoryForQuery = $OFDBdirectory.replace("\","\\") 
     
                     #Note that the OF downloader quantifies gifs as videos for some reason
                     #Since Stash doesn't (and rightfully so), we need to account for this
