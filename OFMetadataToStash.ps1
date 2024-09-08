@@ -983,6 +983,7 @@ function Add-MetadataUsingOFDB{
                         # ----------------------------------- Title ---------------------------------- #
     
                         #Creating the title we want for the media, and defining Stash details for this media.
+                        $mediaID = $OFDBMedia.media_id
                         $postID = $OFDBMedia.post_ID
                         $proposedtitleSuffix = "| $postID"
 
@@ -995,7 +996,7 @@ function Add-MetadataUsingOFDB{
 
                         if($OFDBMultipostQueryResult.count -gt 1) {
                             # Get the position of this media in the array. Data is already in the correct order. 
-                            $mediaPostPosition = [array]::indexof($OFDBMultipostQueryResult.media_id,$OFDBMedia.media_id) + 1
+                            $mediaPostPosition = [array]::indexof($OFDBMultipostQueryResult.media_id,$mediaID) + 1
                             $mediaPostLength = $OFDBMultipostQueryResult.count
                             $proposedtitleSuffix = $proposedtitleSuffix+" [$mediaPostPosition/$mediaPostLength]"
                         }
@@ -1091,7 +1092,7 @@ function Add-MetadataUsingOFDB{
                             }
     
                             #If it's necessary, update the scene by modifying the title and adding details
-                            if($CurrentFileTitle -ne $proposedtitle){
+                            if($CurrentFileTitle -ne $proposedtitle -or $ignorehistory -eq $true){
                                 $StashGQL_Query = 'mutation sceneUpdate($sceneUpdateInput: SceneUpdateInput!){
                                     sceneUpdate(input: $sceneUpdateInput){
                                       id
@@ -1102,6 +1103,7 @@ function Add-MetadataUsingOFDB{
                                       }
                                       details
                                       urls
+                                      code
                                     }
                                   }'  
                                 $StashGQL_QueryVariables = '{
@@ -1111,7 +1113,8 @@ function Add-MetadataUsingOFDB{
                                         "date": "'+$creationdatefromOF+'",
                                         "studio_id": "'+$OnlyFansStudioID+'",
                                         "details": "'+$detailsToAddToStash+'",
-                                        "urls": "'+$linktoOFpost+'"
+                                        "urls": "'+$linktoOFpost+'",
+                                        "code": "'+$mediaID+'"
                                     }
                                 }'
     
@@ -1209,7 +1212,7 @@ function Add-MetadataUsingOFDB{
                             }
     
                             #If it's necessary, update the image by modifying the title and adding details
-                            if($CurrentFileTitle -ne $proposedtitle){
+                            if($CurrentFileTitle -ne $proposedtitle -or $ignorehistory -eq $true){
                                 if ($boolSetImageDetails -eq $true){
                                     $StashGQL_Query = 'mutation imageUpdate($imageUpdateInput: ImageUpdateInput!){
                                         imageUpdate(input: $imageUpdateInput){
@@ -1221,6 +1224,7 @@ function Add-MetadataUsingOFDB{
                                           }
                                           urls
                                           details
+                                          code
                                         }
                                       }'  
     
@@ -1231,7 +1235,8 @@ function Add-MetadataUsingOFDB{
                                             "date": "'+$creationdatefromOF+'",
                                             "studio_id": "'+$OnlyFansStudioID+'",
                                             "details": "'+$detailsToAddToStash+'",
-                                            "urls": "'+$linktoOFpost+'"
+                                            "urls": "'+$linktoOFpost+'",
+                                            "code": "'+$mediaID+'"
                                         }
                                     }'
                                 }
@@ -1245,6 +1250,7 @@ function Add-MetadataUsingOFDB{
                                             id
                                           }
                                           urls
+                                          code
                                         }
                                       }'  
     
@@ -1254,7 +1260,8 @@ function Add-MetadataUsingOFDB{
                                             "title": "'+$proposedtitle+'",
                                             "date": "'+$creationdatefromOF+'",
                                             "studio_id": "'+$OnlyFansStudioID+'",
-                                            "urls": "'+$linktoOFpost+'"
+                                            "urls": "'+$linktoOFpost+'",
+                                            "code": "'+$mediaID+'"
                                         }
                                     }'
                                 }
