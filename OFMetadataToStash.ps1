@@ -780,7 +780,7 @@ function Add-MetadataUsingOFDB{
              
             if (!(DatabaseHasAlreadyBeenImported)){
                 #Select all the media (except audio) and the text the performer associated to them, if available from the OFDB
-                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
+                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
                 $OF_DBpath = $currentdatabase.fullname 
                 $OFDBQueryResult = Invoke-SqliteQuery -Query $Query -DataSource $OF_DBpath
 
@@ -979,12 +979,37 @@ function Add-MetadataUsingOFDB{
                                 $CurrentFileTitle = $StashGQL_Result.data.querySQL.rows[0][6]
                             } 
                         }
+
+                        # ----------------------------------- Title ---------------------------------- #
     
                         #Creating the title we want for the media, and defining Stash details for this media.
-                        $proposedtitle = "$performername - $creationdatefromOF"
+                        $postID = $OFDBMedia.post_ID
+                        $proposedtitleSuffix = "| $postID"
+
+                        # Get the media type
+                        $OFDBMediaType = $OFDBMedia.media_type
+
+                        # If the media is one of several items of the same media type in the same post, add its position to the title.
+                        $OFDBMultipostQuery = "SELECT medias.media_id FROM medias WHERE medias.post_id='$postID' AND medias.media_type='$OFDBMediaType'"
+                        $OFDBMultipostQueryResult = Invoke-SqliteQuery -Query $OFDBMultipostQuery -DataSource $OF_DBpath
+
+                        if($OFDBMultipostQueryResult.count -gt 1) {
+                            # Get the position of this media in the array. Data is already in the correct order. 
+                            $mediaPostPosition = [array]::indexof($OFDBMultipostQueryResult.media_id,$OFDBMedia.media_id) + 1
+                            $mediaPostLength = $OFDBMultipostQueryResult.count
+                            $proposedtitleSuffix = $proposedtitleSuffix+" [$mediaPostPosition/$mediaPostLength]"
+                        }
+
+                        $proposedtitle = "$performername $proposedtitleSuffix"
+                        $proposedtitle = $proposedtitle.replace("'","''")
+                        $proposedtitle = $proposedtitle.replace("\","\\")
+                        $proposedtitle = $proposedtitle.replace('"','\"')
+                        $proposedtitle = $proposedtitle.replace('“','\"') #literally removing the curly quote entirely
+                        $proposedtitle = $proposedtitle.replace('”','\"') #literally removing the curly quote entirely
+
+                        # Details
                         $detailsToAddToStash = $OFDBMedia.text
-    
-                        
+                            
                         #Performers love to put links in their posts sometimes. Let's scrub those out in addition to any common HTML bits
                         $detailsToAddToStash = $detailsToAddToStash.Replace("<br />","")
                         $detailsToAddToStash = $detailsToAddToStash.Replace("<a href=","")
@@ -999,12 +1024,6 @@ function Add-MetadataUsingOFDB{
                         $detailsToAddToStash = $detailsToAddToStash.replace('"','\"')
                         $detailsToAddToStash = $detailsToAddToStash.replace('“','\"') #literally removing the curly quote entirely
                         $detailsToAddToStash = $detailsToAddToStash.replace('”','\"') #literally removing the curly quote entirely
-                  
-                        $proposedtitle = $proposedtitle.replace("'","''")
-                        $proposedtitle = $proposedtitle.replace("\","\\")
-                        $proposedtitle = $proposedtitle.replace('"','\"')
-                        $proposedtitle = $proposedtitle.replace('“','\"') #literally removing the curly quote entirely
-                        $proposedtitle = $proposedtitle.replace('”','\"') #literally removing the curly quote entirely
     
                         #Let's check to see if this is a file that already has metadata.
                         #If any metadata is missing, we don't bother with updating a specific column, we just update the entire row
