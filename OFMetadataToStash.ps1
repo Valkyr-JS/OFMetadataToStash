@@ -979,6 +979,8 @@ function Add-MetadataUsingOFDB{
                                 $CurrentFileTitle = $StashGQL_Result.data.querySQL.rows[0][6]
                             } 
                         }
+
+                        # ----------------------------------- Title ---------------------------------- #
     
                         #Creating the title we want for the media, and defining Stash details for this media.
                         $postID = $OFDBMedia.post_ID
@@ -987,20 +989,23 @@ function Add-MetadataUsingOFDB{
                         # Get the media type
                         $OFDBMediaType = $OFDBMedia.media_type
 
-                        # If the media is one of several items of the same type
-                        # in the same post, add this position to the title.
+                        # If the media is one of several items of the same media type in the same post, add its position to the title.
                         $OFDBMultipostQuery = "SELECT medias.media_id FROM medias WHERE medias.post_id='$postID' AND medias.media_type='$OFDBMediaType'"
                         $OFDBMultipostQueryResult = Invoke-SqliteQuery -Query $OFDBMultipostQuery -DataSource $OF_DBpath
 
                         if($OFDBMultipostQueryResult.count -gt 1) {
-                            # Get the position of this media in the array. Data
-                            # is already in the correct order. 
-                            $mediaPostNumber = [array]::indexof($OFDBMultipostQueryResult.media_id,$OFDBMedia.media_id) + 1
+                            # Get the position of this media in the array. Data is already in the correct order. 
+                            $mediaPostPosition = [array]::indexof($OFDBMultipostQueryResult.media_id,$OFDBMedia.media_id) + 1
                             $mediaPostLength = $OFDBMultipostQueryResult.count
-                            $proposedtitleSuffix = $proposedtitleSuffix+" [$mediaPostNumber/$mediaPostLength]"
+                            $proposedtitleSuffix = $proposedtitleSuffix+" [$mediaPostPosition/$mediaPostLength]"
                         }
 
                         $proposedtitle = "$performername $proposedtitleSuffix"
+                        $proposedtitle = $proposedtitle.replace("'","''")
+                        $proposedtitle = $proposedtitle.replace("\","\\")
+                        $proposedtitle = $proposedtitle.replace('"','\"')
+                        $proposedtitle = $proposedtitle.replace('“','\"') #literally removing the curly quote entirely
+                        $proposedtitle = $proposedtitle.replace('”','\"') #literally removing the curly quote entirely
 
                         # Details
                         $detailsToAddToStash = $OFDBMedia.text
@@ -1019,12 +1024,6 @@ function Add-MetadataUsingOFDB{
                         $detailsToAddToStash = $detailsToAddToStash.replace('"','\"')
                         $detailsToAddToStash = $detailsToAddToStash.replace('“','\"') #literally removing the curly quote entirely
                         $detailsToAddToStash = $detailsToAddToStash.replace('”','\"') #literally removing the curly quote entirely
-                  
-                        $proposedtitle = $proposedtitle.replace("'","''")
-                        $proposedtitle = $proposedtitle.replace("\","\\")
-                        $proposedtitle = $proposedtitle.replace('"','\"')
-                        $proposedtitle = $proposedtitle.replace('“','\"') #literally removing the curly quote entirely
-                        $proposedtitle = $proposedtitle.replace('”','\"') #literally removing the curly quote entirely
     
                         #Let's check to see if this is a file that already has metadata.
                         #If any metadata is missing, we don't bother with updating a specific column, we just update the entire row
