@@ -780,7 +780,7 @@ function Add-MetadataUsingOFDB{
              
             if (!(DatabaseHasAlreadyBeenImported)){
                 #Select all the media (except audio) and the text the performer associated to them, if available from the OFDB
-                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.api_type, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.api_type, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
+                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
                 $OF_DBpath = $currentdatabase.fullname 
                 $OFDBQueryResult = Invoke-SqliteQuery -Query $Query -DataSource $OF_DBpath
 
@@ -982,16 +982,29 @@ function Add-MetadataUsingOFDB{
     
                         #Creating the title we want for the media, and defining Stash details for this media.
                         $postID = $OFDBMedia.post_ID
+                        $proposedtitleSuffix = "| $postID"
 
-                        # Set the post type
-                        $postType = $OFDBMedia.api_type
-                        if($OFDBMedia.api_type -eq "Messages") { $postType = "Message" }
-                        elseif($OFDBMedia.api_type -eq "Posts") { $postType = "Post" }
+                        # Get the media type
+                        $OFDBMediaType = $OFDBMedia.media_type
 
-                        $proposedtitle = "$performername | $postID | $postType"
+                        # If the media is one of several items of the same type
+                        # in the same post, add this position to the title.
+                        $OFDBMultipostQuery = "SELECT medias.media_id FROM medias WHERE medias.post_id='$postID' AND medias.media_type='$OFDBMediaType'"
+                        $OFDBMultipostQueryResult = Invoke-SqliteQuery -Query $OFDBMultipostQuery -DataSource $OF_DBpath
+
+                        if($OFDBMultipostQueryResult.count -gt 1) {
+                            # Get the position of this media in the array. Data
+                            # is already in the correct order. 
+                            $mediaPostNumber = [array]::indexof($OFDBMultipostQueryResult.media_id,$OFDBMedia.media_id) + 1
+                            $mediaPostLength = $OFDBMultipostQueryResult.count
+                            $proposedtitleSuffix = $proposedtitleSuffix+" [$mediaPostNumber/$mediaPostLength]"
+                        }
+
+                        $proposedtitle = "$performername $proposedtitleSuffix"
+
+                        # Details
                         $detailsToAddToStash = $OFDBMedia.text
-    
-                        
+                            
                         #Performers love to put links in their posts sometimes. Let's scrub those out in addition to any common HTML bits
                         $detailsToAddToStash = $detailsToAddToStash.Replace("<br />","")
                         $detailsToAddToStash = $detailsToAddToStash.Replace("<a href=","")
