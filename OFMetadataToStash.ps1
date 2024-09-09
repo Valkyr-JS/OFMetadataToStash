@@ -675,9 +675,10 @@ function Add-MetadataUsingOFDB{
     }
 
     # We won't create the missing tags until we know we need them.
-    $stashTagID_postType_message = Get-StashMetaTagID -stashTagName "[Meta] Post type: Message"
-    $stashTagID_postType_story = Get-StashMetaTagID -stashTagName "[Meta] Post type: Story"
-    $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName "[Meta] Post type: Wall post"
+    $stashTagName_postType_message = "[Meta] post type: message"
+    $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
+    $stashTagID_postType_story = Get-StashMetaTagID -stashTagName "[Meta] post type: story"
+    $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName "[Meta] post type: wall post"
 
     $totalprogressCounter = 1 #Used for the progress UI
 
@@ -826,7 +827,7 @@ function Add-MetadataUsingOFDB{
              
             if (!(DatabaseHasAlreadyBeenImported)){
                 #Select all the media (except audio) and the text the performer associated to them, if available from the OFDB
-                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
+                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
                 $OF_DBpath = $currentdatabase.fullname 
                 $OFDBQueryResult = Invoke-SqliteQuery -Query $Query -DataSource $OF_DBpath
 
@@ -1340,6 +1341,76 @@ function Add-MetadataUsingOFDB{
                                 $numUnmodified++
                             }
                         } 
+
+
+                        # ----------------------------- Add metadata tags ---------------------------- #
+
+                        $tagIDsToAdd = @()
+                        $postType = $OFDBMedia.api_type
+
+                        if($postType -eq "Messages") {
+                            # Check if the tag ID we got earlier is null. If so, create a new tag.
+                            if($null -eq $stashTagID_postType_message) {
+                                $StashGQL_TagCreateQuery = 'mutation TagCreate($input: TagCreateInput!) {
+                                    tagCreate(input: $input) {
+                                        name
+                                    }
+                                }'
+                
+                                $StashGQL_TagCreateQueryVariables = '{
+                                    "input": {
+                                        "name": "'+$stashTagName_postType_message+'",
+                                    }    
+                                }' 
+                            
+                                try{
+                                    Invoke-GraphQLQuery -Query $StashGQL_TagCreateQuery -Uri $StashGQL_URL -Variables $StashGQL_TagCreateQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
+                                }
+                                catch{
+                                    write-host "(3) Error: There was an issue with the GraphQL mutation." -ForegroundColor red
+                                    write-host "Additional Error Info: `n`n$StashGQL_TagCreateQuery `n$StashGQL_TagCreateQueryVariables"
+                                    read-host "Press [Enter] to exit"
+                                    exit
+                                }
+
+                                $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
+                            }
+                            $tagIDsToAdd += "$stashTagID_postType_message"
+                        }
+
+                        # Once we have all the appropriate tags, update the Stash database
+                        if($tagIDsToAdd.count -gt 0) {
+                            if($mediatype -eq "video") {
+                                $updateType = "sceneUpdate"
+                                $updateTypeCapped = "SceneUpdate"
+                            } elseif($mediatype -eq "image") {
+                                $updateType = "imageUpdate"
+                                $updateTypeCapped = "ImageUpdate"
+                            }
+                            $StashGQL_SceneTagsQuery = 'mutation '+$updateTypeCapped+'($'+$updateType+'Input: '+$updateTypeCapped+'Input!){
+                                '+$updateType+'(input: $'+$updateType+'Input){
+                                    id
+                                    tags {
+                                        id
+                                    }
+                                }
+                            }'
+                            $StashGQL_SceneTagsQueryVariables = ' {
+                                "'+$updateType+'Input": {
+                                    "id": "'+$CurrentFileID+'",
+                                    "tag_ids": ['+$tagIDsToAdd+']
+                                }
+                            }'
+                            try{
+                                Invoke-GraphQLQuery -Query $StashGQL_SceneTagsQuery -Uri $StashGQL_URL -Variables $StashGQL_SceneTagsQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
+                            }
+                            catch{
+                                write-host "(7) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+                                write-host "Additional Error Info: `n`n$StashGQL_SceneTagsQuery `n$StashGQL_SceneTagsQueryVariables"
+                                read-host "Press [Enter] to exit"
+                                exit
+                            }
+                        }
                     }
                 }
             }
