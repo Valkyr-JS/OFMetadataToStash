@@ -633,6 +633,52 @@ function Add-MetadataUsingOFDB{
         
     }
 
+    # ----------------------- Find or create metadata tags ----------------------- #
+
+    # Check if certain Stash tags have been created. If so, get their IDs.
+    function Get-StashMetaTag {
+        param (
+            [string]$stashTagName
+        )
+        $stashTagID = $null
+
+        $StashGQL_TagQuery = '
+        query FindTags($tag_filter: TagFilterType) {
+            findTags(tag_filter: $tag_filter) {
+                tags {
+                    id
+                    name
+                }
+            }
+        }
+        ' 
+        $StashGQL_TagQueryVariables = '{
+            "tag_filter": {
+              "name": {
+                "value": "'+$stashTagName+'",
+                "modifier": "EQUALS"
+              }
+            }
+        }'
+        try{
+            $StashGQL_TagResult = Invoke-GraphQLQuery -Query $StashGQL_TagQuery -Uri $StashGQL_URL -Variables $StashGQL_TagQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+        }
+        catch{
+            write-host "(9a) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_TagQuery `n$StashGQL_TagQueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+
+        $stashTagID = $StashGQL_TagResult.data.findTags.tags[0].id
+        return $stashTagID
+    }
+
+    # We won't create the missing tags until we know we need them.
+    $stashTagID_postType_message = Get-StashMetaTag -stashTagName "[Meta] Post type: Message"
+    $stashTagID_postType_story = Get-StashMetaTag -stashTagName "[Meta] Post type: Story"
+    $stashTagID_postType_wallPost = Get-StashMetaTag -stashTagName "[Meta] Post type: Wall post"
+
     $totalprogressCounter = 1 #Used for the progress UI
 
     foreach ($currentdatabase in $OFDatabaseFilesCollection) {
