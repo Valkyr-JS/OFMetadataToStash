@@ -636,7 +636,7 @@ function Add-MetadataUsingOFDB{
     # ----------------------- Find or create metadata tags ----------------------- #
 
     # Check if certain Stash tags have been created. If so, get their IDs.
-    function Get-StashMetaTag {
+    function Get-StashMetaTagID {
         param (
             [string]$stashTagName
         )
@@ -675,9 +675,9 @@ function Add-MetadataUsingOFDB{
     }
 
     # We won't create the missing tags until we know we need them.
-    $stashTagID_postType_message = Get-StashMetaTag -stashTagName "[Meta] Post type: Message"
-    $stashTagID_postType_story = Get-StashMetaTag -stashTagName "[Meta] Post type: Story"
-    $stashTagID_postType_wallPost = Get-StashMetaTag -stashTagName "[Meta] Post type: Wall post"
+    $stashTagID_postType_message = Get-StashMetaTagID -stashTagName "[Meta] Post type: Message"
+    $stashTagID_postType_story = Get-StashMetaTagID -stashTagName "[Meta] Post type: Story"
+    $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName "[Meta] Post type: Wall post"
 
     $totalprogressCounter = 1 #Used for the progress UI
 
