@@ -633,9 +633,6 @@ function Add-MetadataUsingOFDB{
         
     }
 
-    # ----------------------- Find or create metadata tags ----------------------- #
-
-    # Check if certain Stash tags have been created. If so, get their IDs.
     function Get-StashMetaTagID {
         param (
             [string]$stashTagName
@@ -701,14 +698,6 @@ function Add-MetadataUsingOFDB{
             exit
         }
     }
-
-    # We won't create the missing tags until we know we need them.
-    $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
-    $stashTagName_postType_message = "[Meta] post type: message"
-    $stashTagID_postType_story = Get-StashMetaTagID -stashTagName "[Meta] post type: story"
-    $stashTagName_postType_story = "[Meta] post type: wall post"
-    $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName "[Meta] post type: wall post"
-    $stashTagName_postType_wallPost = "[Meta] post type: wall post"
 
     $totalprogressCounter = 1 #Used for the progress UI
 
@@ -1375,6 +1364,18 @@ function Add-MetadataUsingOFDB{
 
                         # ----------------------------- Add metadata tags ---------------------------- #
 
+                        $stashTagName_postType_message = "[Meta] post type: message"
+                        $stashTagName_postType_story = "[Meta] post type: wall post"
+                        $stashTagName_postType_wallPost = "[Meta] post type: wall post"
+                        $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
+                        $stashTagID_postType_story = Get-StashMetaTagID -stashTagName $stashTagName_postType_story
+                        $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName $stashTagName_postType_wallPost
+
+                        $stashTagName_price_free = "[Meta] pricing: free"
+                        $stashTagID_price_free = Get-StashMetaTagID -stashTagName $stashTagName_price_free
+                        $stashTagName_price_paid = "[Meta] pricing: paid"
+                        $stashTagID_price_paid = Get-StashMetaTagID -stashTagName $stashTagName_price_paid
+
                         $tagIDsToAdd = @()
                         $postType = $OFDBMedia.api_type
 
@@ -1402,6 +1403,23 @@ function Add-MetadataUsingOFDB{
                             $tagIDsToAdd += $stashTagID_postType_story
                         }
 
+                        # Pricing tags
+                        if($OFDBdirectory.contains("/Free/")) {
+                            # Check if the tag ID we got earlier is null. If so, create a new tag.
+                            if($null -eq $stashTagID_price_free) {
+                                Set-StashMetaTagID -thisStashTagName $stashTagName_price_free
+                                $stashTagID_price_free = Get-StashMetaTagID -stashTagName $stashTagName_price_free
+                            }
+                            $tagIDsToAdd += $stashTagID_price_free
+                        } elseif($OFDBdirectory.contains("/Paid/")) {
+                            # Check if the tag ID we got earlier is null. If so, create a new tag.
+                            if($null -eq $stashTagID_price_paid) {
+                                Set-StashMetaTagID -thisStashTagName $stashTagName_price_paid
+                                $stashTagID_price_paid = Get-StashMetaTagID -stashTagName $stashTagName_price_paid
+                            }
+                            $tagIDsToAdd += $stashTagID_price_paid
+                        }
+
                         # Once we have all the appropriate tags, update the Stash database
                         if($tagIDsToAdd.count -gt 0) {
                             if($mediatype -eq "video") {
@@ -1422,7 +1440,7 @@ function Add-MetadataUsingOFDB{
                             $StashGQL_SceneTagsQueryVariables = ' {
                                 "'+$updateType+'Input": {
                                     "id": "'+$CurrentFileID+'",
-                                    "tag_ids": ['+$tagIDsToAdd+']
+                                    "tag_ids": ['+($tagIDsToAdd -join ",")+']
                                 }
                             }'
                             try{
