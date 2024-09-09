@@ -674,11 +674,41 @@ function Add-MetadataUsingOFDB{
         return $stashTagID
     }
 
+    function Set-StashMetaTagID {
+        param(
+            [string]$thisStashTagName
+        )
+
+        $StashGQL_TagCreateQuery = 'mutation TagCreate($input: TagCreateInput!) {
+            tagCreate(input: $input) {
+                name
+            }
+        }'
+
+        $StashGQL_TagCreateQueryVariables = '{
+            "input": {
+                "name": "'+$thisStashTagName+'",
+            }    
+        }' 
+    
+        try{
+            Invoke-GraphQLQuery -Query $StashGQL_TagCreateQuery -Uri $StashGQL_URL -Variables $StashGQL_TagCreateQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
+        }
+        catch{
+            write-host "(3) Error: There was an issue with the GraphQL mutation." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_TagCreateQuery `n$StashGQL_TagCreateQueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+    }
+
     # We won't create the missing tags until we know we need them.
-    $stashTagName_postType_message = "[Meta] post type: message"
     $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
+    $stashTagName_postType_message = "[Meta] post type: message"
     $stashTagID_postType_story = Get-StashMetaTagID -stashTagName "[Meta] post type: story"
+    $stashTagName_postType_story = "[Meta] post type: wall post"
     $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName "[Meta] post type: wall post"
+    $stashTagName_postType_wallPost = "[Meta] post type: wall post"
 
     $totalprogressCounter = 1 #Used for the progress UI
 
@@ -1348,34 +1378,28 @@ function Add-MetadataUsingOFDB{
                         $tagIDsToAdd = @()
                         $postType = $OFDBMedia.api_type
 
+                        # Post type tags
                         if($postType -eq "Messages") {
                             # Check if the tag ID we got earlier is null. If so, create a new tag.
                             if($null -eq $stashTagID_postType_message) {
-                                $StashGQL_TagCreateQuery = 'mutation TagCreate($input: TagCreateInput!) {
-                                    tagCreate(input: $input) {
-                                        name
-                                    }
-                                }'
-                
-                                $StashGQL_TagCreateQueryVariables = '{
-                                    "input": {
-                                        "name": "'+$stashTagName_postType_message+'",
-                                    }    
-                                }' 
-                            
-                                try{
-                                    Invoke-GraphQLQuery -Query $StashGQL_TagCreateQuery -Uri $StashGQL_URL -Variables $StashGQL_TagCreateQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
-                                }
-                                catch{
-                                    write-host "(3) Error: There was an issue with the GraphQL mutation." -ForegroundColor red
-                                    write-host "Additional Error Info: `n`n$StashGQL_TagCreateQuery `n$StashGQL_TagCreateQueryVariables"
-                                    read-host "Press [Enter] to exit"
-                                    exit
-                                }
-
+                                Set-StashMetaTagID -thisStashTagName $stashTagName_postType_message
                                 $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
                             }
-                            $tagIDsToAdd += "$stashTagID_postType_message"
+                            $tagIDsToAdd += $stashTagID_postType_message
+                        } elseif($postType -eq "Posts") {
+                            # Check if the tag ID we got earlier is null. If so, create a new tag.
+                            if($null -eq $stashTagID_postType_wallPost) {
+                                Set-StashMetaTagID -thisStashTagName $stashTagName_postType_wallPost
+                                $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName $stashTagName_postType_wallPost
+                            }
+                            $tagIDsToAdd += $stashTagID_postType_wallPost
+                        } elseif($postType -eq "Stories") {
+                            # Check if the tag ID we got earlier is null. If so, create a new tag.
+                            if($null -eq $stashTagID_postType_story) {
+                                Set-StashMetaTagID -thisStashTagName $stashTagName_postType_story
+                                $stashTagID_postType_story = Get-StashMetaTagID -stashTagName $stashTagName_postType_story
+                            }
+                            $tagIDsToAdd += $stashTagID_postType_story
                         }
 
                         # Once we have all the appropriate tags, update the Stash database
