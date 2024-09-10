@@ -637,6 +637,7 @@ function Add-MetadataUsingOFDB{
         # Create the studio
         $StashGQL_Query = 'mutation StudioCreate($input: StudioCreateInput!) {
             studioCreate(input: $input) {
+                aliases
                 name
                 stash_ids {
                     endpoint
@@ -648,6 +649,7 @@ function Add-MetadataUsingOFDB{
 
         $StashGQL_QueryVariables = '{
             "input": {
+                "aliases": ["'+$performername+'"],
                 "name": "'+$OnlyFansStudioName+'",
                 "stash_ids": [{
                     "endpoint": "'+$FansDbGQL_URL+'",
