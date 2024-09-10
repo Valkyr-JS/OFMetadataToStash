@@ -1364,6 +1364,9 @@ function Add-MetadataUsingOFDB{
 
                         # ----------------------------- Add metadata tags ---------------------------- #
 
+                        $stashTagName_availability_archived = "[Meta] availability: archived"
+                        $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
+
                         $stashTagName_postType_message = "[Meta] post type: message"
                         $stashTagName_postType_story = "[Meta] post type: wall post"
                         $stashTagName_postType_wallPost = "[Meta] post type: wall post"
@@ -1418,6 +1421,16 @@ function Add-MetadataUsingOFDB{
                                 $stashTagID_price_paid = Get-StashMetaTagID -stashTagName $stashTagName_price_paid
                             }
                             $tagIDsToAdd += $stashTagID_price_paid
+                        }
+
+                        # Availability tags
+                        if($OFDBdirectory.contains("/Archived/")) {
+                            # Check if the tag ID we got earlier is null. If so, create a new tag.
+                            if($null -eq $stashTagID_availability_archived) {
+                                Set-StashMetaTagID -thisStashTagName $stashTagName_availability_archived
+                                $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
+                            }
+                            $tagIDsToAdd += $stashTagID_availability_archived
                         }
 
                         # Once we have all the appropriate tags, update the Stash database
