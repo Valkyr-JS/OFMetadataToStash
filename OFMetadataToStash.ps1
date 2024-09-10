@@ -543,7 +543,10 @@ function Add-MetadataUsingOFDB{
     $nummissingfiles = 0
     $scriptStartTime = get-date
 
-    #Getting the OnlyFans Studio ID or creating it if it does not exist.
+    # ----------------------------- Create the studio ---------------------------- #
+
+    $OnlyFansStudioName = "$performername (OnlyFans)"
+
     $StashGQL_Query = '
     query FindStudios($filter: FindFilterType, $studio_filter: StudioFilterType) {
         findStudios(filter: $filter, studio_filter: $studio_filter) {
@@ -561,7 +564,7 @@ function Add-MetadataUsingOFDB{
         },
         "studio_filter": {
           "name": {
-            "value": "OnlyFans",
+            "value": "'+$OnlyFansStudioName+'",
             "modifier": "EQUALS"
           }
         }
@@ -577,19 +580,49 @@ function Add-MetadataUsingOFDB{
     }
     $OnlyFansStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
 
-    #If Stash returns with an ID for 'OnlyFans', great. Otherwise, let's create a new studio
+    #If Stash returns with an ID for the page, great. Otherwise, let's create a new studio
     if ($null -eq $OnlyFansStudioID){
+        # Get data from FansDB
+        $FansDbStudioName = "$performername (OnlyFans)"
+        $FansDbGQL_URL = "https://fansdb.cc/graphql"
+        $FansDbGQL_ApiKey = "" # ! FETCH API KEY FROM STASH APP CONFIG
+
+        $FansDbGQL_Query = 'query {
+                queryStudios(input: { name: "\"'+$FansDbStudioName+'\"" }) {
+                    studios {
+                        id
+                        name
+                        urls {
+                            url
+                        }
+                    }
+                }
+            }'
+        try{
+            $FansDbGQL_Result = Invoke-GraphQLQuery -Query $FansDbGQL_Query -Uri $FansDbGQL_URL -Headers @{ApiKey = $FansDbGQL_ApiKey }
+        }
+        catch{
+            Write-Host $_.Exception.Message
+            write-host "Error: There was an issue with the FansDB GraphQL query." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$FansDbGQL_Query `n$FansDbGQL_QueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+        
+    
+        write-host $FansDbGQL_Result
+
         $StashGQL_Query = 'mutation StudioCreate($input: StudioCreateInput!) {
             studioCreate(input: $input) {
-              name
-              url
+                name
+                url
             }
-          }'
+        }'
 
         $StashGQL_QueryVariables = '{
             "input": {
-                "name": "OnlyFans",
-                "url": "www.onlyfans.com/"
+                "name": "'+$studioName+'",
+                "url": "'+$FansDbGQL_Result.data.queryStudios.studios[0].urls[0].url+'",
             }    
         }'
 
@@ -611,12 +644,11 @@ function Add-MetadataUsingOFDB{
                     name
                 }
             }
-        }
-        ' 
+        }' 
         $StashGQL_QueryVariables = '{
-        "filter": {
-            "q": "OnlyFans"
-        }
+            "filter": {
+                "q": "'+$studioName+'"
+            }
         }'
         try{
             $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
@@ -629,8 +661,7 @@ function Add-MetadataUsingOFDB{
         }
 
         $OnlyFansStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
-        write-host "`nInfo: Added the OnlyFans studio to Stash's database" -ForegroundColor Cyan
-        
+        write-host "`nInfo: Added the studio '$studioName' to Stash's database" -ForegroundColor Cyan
     }
 
     function Get-StashMetaTagID {
