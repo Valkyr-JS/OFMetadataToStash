@@ -647,6 +647,12 @@ function Add-MetadataUsingOFDB{
             }
         }'
 
+        # Format the URL for consistency
+        $OnlyFansStudioURL = [string]$FansDbGQL_Result.data.queryStudios.studios[0].urls[0].url
+        if($null -ne $OnlyFansStudioURL -and $OnlyFansStudioURL.Substring($OnlyFansStudioURL.Length - 1) -ne "/") {
+            $OnlyFansStudioURL += "/"
+        }
+
         $StashGQL_QueryVariables = '{
             "input": {
                 "aliases": ["'+$performername+'"],
@@ -655,7 +661,7 @@ function Add-MetadataUsingOFDB{
                     "endpoint": "'+$FansDbGQL_URL+'",
                     "stash_id": "'+$FansDbGQL_Result.data.queryStudios.studios[0].id+'"
                 }],
-                "url": "'+$FansDbGQL_Result.data.queryStudios.studios[0].urls[0].url+'",
+                "url": "'+$OnlyFansStudioURL+'",
             }    
         }'
 
