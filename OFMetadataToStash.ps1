@@ -585,8 +585,31 @@ function Add-MetadataUsingOFDB{
         # Get data from FansDB
         $FansDbStudioName = "$performername (OnlyFans)"
         $FansDbGQL_URL = "https://fansdb.cc/graphql"
-        $FansDbGQL_ApiKey = "" # ! FETCH API KEY FROM STASH APP CONFIG
 
+        # Fetch FansDB API key from the local Stash config
+        $StashGQL_FansDBApiQuery = '
+        query {
+            configuration {
+                general {
+                    stashBoxes {
+                        endpoint
+                        api_key
+                    }
+                }
+            }
+        }' 
+        try{
+            $StashGQL_FansDBApiResult = Invoke-GraphQLQuery -Query $StashGQL_FansDBApiQuery -Uri $StashGQL_URL -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+        }
+        catch{
+            write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_FansDBApiQuery"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+
+        $FansDbGQL_ApiKey = ($StashGQL_FansDBApiResult.data.configuration.general.stashBoxes | where-object { $_.endpoint -eq $FansDbGQL_URL }).api_key
+    
         $FansDbGQL_Query = 'query {
                 queryStudios(input: { name: "\"'+$FansDbStudioName+'\"" }) {
                     studios {
@@ -599,7 +622,7 @@ function Add-MetadataUsingOFDB{
                 }
             }'
         try{
-            $FansDbGQL_Result = Invoke-GraphQLQuery -Query $FansDbGQL_Query -Uri $FansDbGQL_URL -Headers @{ApiKey = $FansDbGQL_ApiKey }
+            $FansDbGQL_Result = Invoke-GraphQLQuery -Query $FansDbGQL_Query -Uri $FansDbGQL_URL -Headers @{ApiKey = "$FansDbGQL_ApiKey" }
         }
         catch{
             Write-Host $_.Exception.Message
@@ -621,7 +644,7 @@ function Add-MetadataUsingOFDB{
 
         $StashGQL_QueryVariables = '{
             "input": {
-                "name": "'+$studioName+'",
+                "name": "'+$OnlyFansStudioName+'",
                 "url": "'+$FansDbGQL_Result.data.queryStudios.studios[0].urls[0].url+'",
             }    
         }'
