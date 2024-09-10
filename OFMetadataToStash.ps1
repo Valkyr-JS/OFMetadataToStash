@@ -545,6 +545,7 @@ function Add-MetadataUsingOFDB{
 
     # ----------------------------- Create the studio ---------------------------- #
 
+    # Check if the studio exists
     $OnlyFansStudioName = "$performername (OnlyFans)"
 
     $StashGQL_Query = '
@@ -608,6 +609,7 @@ function Add-MetadataUsingOFDB{
             exit
         }
 
+        # Query FansDB for certain data, most importantly the studio stash ID.
         $FansDbGQL_ApiKey = ($StashGQL_FansDBApiResult.data.configuration.general.stashBoxes | where-object { $_.endpoint -eq $FansDbGQL_URL }).api_key
     
         $FansDbGQL_Query = 'query {
@@ -632,12 +634,14 @@ function Add-MetadataUsingOFDB{
             exit
         }
         
-    
-        write-host $FansDbGQL_Result
-
+        # Create the studio
         $StashGQL_Query = 'mutation StudioCreate($input: StudioCreateInput!) {
             studioCreate(input: $input) {
                 name
+                stash_ids {
+                    endpoint
+                    stash_id
+                }
                 url
             }
         }'
@@ -645,6 +649,10 @@ function Add-MetadataUsingOFDB{
         $StashGQL_QueryVariables = '{
             "input": {
                 "name": "'+$OnlyFansStudioName+'",
+                "stash_ids": [{
+                    "endpoint": "'+$FansDbGQL_URL+'",
+                    "stash_id": "'+$FansDbGQL_Result.data.queryStudios.studios[0].id+'"
+                }],
                 "url": "'+$FansDbGQL_Result.data.queryStudios.studios[0].urls[0].url+'",
             }    
         }'
@@ -658,6 +666,8 @@ function Add-MetadataUsingOFDB{
             read-host "Press [Enter] to exit"
             exit
         }
+
+        # Query the local Stash instance again to fetch the newly created studios ID.
         $StashGQL_Query = '
         query FindStudios($filter: FindFilterType, $studio_filter: StudioFilterType) {
             findStudios(filter: $filter, studio_filter: $studio_filter) {
@@ -670,7 +680,7 @@ function Add-MetadataUsingOFDB{
         }' 
         $StashGQL_QueryVariables = '{
             "filter": {
-                "q": "'+$studioName+'"
+                "q": "'+$OnlyFansStudioName+'"
             }
         }'
         try{
@@ -684,7 +694,7 @@ function Add-MetadataUsingOFDB{
         }
 
         $OnlyFansStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
-        write-host "`nInfo: Added the studio '$studioName' to Stash's database" -ForegroundColor Cyan
+        write-host "`nInfo: Added the studio '$OnlyFansStudioName' to Stash's database" -ForegroundColor Cyan
     }
 
     function Get-StashMetaTagID {
