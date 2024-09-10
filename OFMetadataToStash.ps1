@@ -543,6 +543,98 @@ function Add-MetadataUsingOFDB{
     $nummissingfiles = 0
     $scriptStartTime = get-date
 
+    # ------------------------- Get the OF network studio ------------------------ #
+
+    $networkStudioName = "OnlyFans (network)"
+
+    #Get the OnlyFans Studio ID
+    $StashGQL_Query = '
+    query FindStudios($filter: FindFilterType, $studio_filter: StudioFilterType) {
+        findStudios(filter: $filter, studio_filter: $studio_filter) {
+            count
+            studios {
+                id
+                name
+            }
+        }
+    }
+    ' 
+    $StashGQL_QueryVariables = '{
+        "filter": {
+          "q": ""
+        },
+        "studio_filter": {
+          "name": {
+            "value": "'+$networkStudioName+'",
+            "modifier": "EQUALS"
+          }
+        }
+      }'
+    try{
+        $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+    }
+    catch{
+        write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+        write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+        read-host "Press [Enter] to exit"
+        exit
+    }
+    $networkStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
+
+    #If Stash returns with an ID for 'OnlyFans (network)', great. Otherwise, let's create a new studio
+    if ($null -eq $networkStudioID){
+        $StashGQL_Query = 'mutation StudioCreate($input: StudioCreateInput!) {
+            studioCreate(input: $input) {
+                aliases
+                name
+                url
+            }
+        }'
+        $StashGQL_QueryVariables = '{
+            "input": {
+                "aliases": "OnlyFans",
+                "name": "'+$networkStudioName+'",
+                "url": "https://onlyfans.com/"
+            }    
+        }'
+        try{
+            $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+        }
+        catch{
+            write-host "(9) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+        $StashGQL_Query = '
+        query FindStudios($filter: FindFilterType, $studio_filter: StudioFilterType) {
+            findStudios(filter: $filter, studio_filter: $studio_filter) {
+                count
+                studios {
+                    id
+                    name
+                }
+            }
+        }'
+        $StashGQL_QueryVariables = '{
+            "filter": {
+                "q": "'+$networkStudioName+'"
+            }
+        }'
+        try{
+            $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+        }
+        catch{
+            write-host "(9a) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+
+        $networkStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
+        write-host "`nInfo: Added the 'OnlyFans (network)' studio to Stash's database." -ForegroundColor Cyan
+    }
+
     # ----------------------------- Create the studio ---------------------------- #
 
     # Check if the studio exists
@@ -627,7 +719,6 @@ function Add-MetadataUsingOFDB{
             $FansDbGQL_Result = Invoke-GraphQLQuery -Query $FansDbGQL_Query -Uri $FansDbGQL_URL -Headers @{ApiKey = "$FansDbGQL_ApiKey" }
         }
         catch{
-            Write-Host $_.Exception.Message
             write-host "Error: There was an issue with the FansDB GraphQL query." -ForegroundColor red
             write-host "Additional Error Info: `n`n$FansDbGQL_Query `n$FansDbGQL_QueryVariables"
             read-host "Press [Enter] to exit"
@@ -657,6 +748,7 @@ function Add-MetadataUsingOFDB{
             "input": {
                 "aliases": ["'+$performername+'"],
                 "name": "'+$OnlyFansStudioName+'",
+                "parent_id": '+$networkStudioID+',
                 "stash_ids": [{
                     "endpoint": "'+$FansDbGQL_URL+'",
                     "stash_id": "'+$FansDbGQL_Result.data.queryStudios.studios[0].id+'"
