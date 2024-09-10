@@ -543,6 +543,33 @@ function Add-MetadataUsingOFDB{
     $nummissingfiles = 0
     $scriptStartTime = get-date
 
+    # --------------------------- Fetch FansDB API key --------------------------- #
+
+    $FansDbGQL_URL = "https://fansdb.cc/graphql"
+
+    # Fetch FansDB API key from the local Stash config
+    $StashGQL_FansDBApiQuery = '
+    query {
+        configuration {
+            general {
+                stashBoxes {
+                    endpoint
+                    api_key
+                }
+            }
+        }
+    }' 
+    try{
+        $StashGQL_FansDBApiResult = Invoke-GraphQLQuery -Query $StashGQL_FansDBApiQuery -Uri $StashGQL_URL -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+    }
+    catch{
+        write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+        write-host "Additional Error Info: `n`n$StashGQL_FansDBApiQuery"
+        read-host "Press [Enter] to exit"
+        exit
+    }
+    $FansDbGQL_ApiKey = ($StashGQL_FansDBApiResult.data.configuration.general.stashBoxes | where-object { $_.endpoint -eq $FansDbGQL_URL }).api_key
+
     # ------------------------- Get the OF network studio ------------------------ #
 
     $networkStudioName = "OnlyFans (network)"
@@ -583,10 +610,35 @@ function Add-MetadataUsingOFDB{
 
     #If Stash returns with an ID for 'OnlyFans (network)', great. Otherwise, let's create a new studio
     if ($null -eq $networkStudioID){
+        $FansDbNetworkName = "OnlyFans (network)"
+
+        # Query FansDB for certain data, most importantly the studio stash ID.
+        $FansDbGQL_Query = 'query {
+            queryStudios(input: { name: "\"'+$FansDbNetworkName+'\"" }) {
+                studios {
+                    id
+                    name
+                }
+            }
+        }'
+        try{
+            $FansDbGQL_Result = Invoke-GraphQLQuery -Query $FansDbGQL_Query -Uri $FansDbGQL_URL -Headers @{ApiKey = "$FansDbGQL_ApiKey" }
+        }
+        catch{
+            write-host "Error: There was an issue with the FansDB GraphQL query." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$FansDbGQL_Query `n$FansDbGQL_QueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+    
         $StashGQL_Query = 'mutation StudioCreate($input: StudioCreateInput!) {
             studioCreate(input: $input) {
                 aliases
                 name
+                stash_ids {
+                    endpoint
+                    stash_id
+                }
                 url
             }
         }'
@@ -594,6 +646,10 @@ function Add-MetadataUsingOFDB{
             "input": {
                 "aliases": "OnlyFans",
                 "name": "'+$networkStudioName+'",
+                "stash_ids": [{
+                    "endpoint": "'+$FansDbGQL_URL+'",
+                    "stash_id": "'+$FansDbGQL_Result.data.queryStudios.studios[0].id+'"
+                }],
                 "url": "https://onlyfans.com/"
             }    
         }'
@@ -677,33 +733,8 @@ function Add-MetadataUsingOFDB{
     if ($null -eq $OnlyFansStudioID){
         # Get data from FansDB
         $FansDbStudioName = "$performername (OnlyFans)"
-        $FansDbGQL_URL = "https://fansdb.cc/graphql"
-
-        # Fetch FansDB API key from the local Stash config
-        $StashGQL_FansDBApiQuery = '
-        query {
-            configuration {
-                general {
-                    stashBoxes {
-                        endpoint
-                        api_key
-                    }
-                }
-            }
-        }' 
-        try{
-            $StashGQL_FansDBApiResult = Invoke-GraphQLQuery -Query $StashGQL_FansDBApiQuery -Uri $StashGQL_URL -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
-        }
-        catch{
-            write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
-            write-host "Additional Error Info: `n`n$StashGQL_FansDBApiQuery"
-            read-host "Press [Enter] to exit"
-            exit
-        }
 
         # Query FansDB for certain data, most importantly the studio stash ID.
-        $FansDbGQL_ApiKey = ($StashGQL_FansDBApiResult.data.configuration.general.stashBoxes | where-object { $_.endpoint -eq $FansDbGQL_URL }).api_key
-    
         $FansDbGQL_Query = 'query {
                 queryStudios(input: { name: "\"'+$FansDbStudioName+'\"" }) {
                     studios {
