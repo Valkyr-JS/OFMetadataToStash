@@ -1364,6 +1364,8 @@ function Add-MetadataUsingOFDB{
 
                         # ----------------------------- Add metadata tags ---------------------------- #
 
+                        $postType = $OFDBMedia.api_type
+
                         $stashTagName_availability_archived = "[Meta] availability: archived"
                         $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
 
@@ -1379,8 +1381,15 @@ function Add-MetadataUsingOFDB{
                         $stashTagName_price_paid = "[Meta] pricing: paid"
                         $stashTagID_price_paid = Get-StashMetaTagID -stashTagName $stashTagName_price_paid
 
-                        $tagIDsToAdd = @()
-                        $postType = $OFDBMedia.api_type
+                        $stashTagName_scraper_ofdl = "[Meta] scraper: OFDL"
+                        $stashTagID_scraper_ofdl = Get-StashMetaTagID -stashTagName $stashTagName_scraper_ofdl
+
+                        # Tag everything with an OFDL tag
+                        if($null -eq $stashTagID_scraper_ofdl) {
+                            Set-StashMetaTagID -thisStashTagName $stashTagName_scraper_ofdl
+                            $stashTagID_scraper_ofdl = Get-StashMetaTagID -stashTagName $stashTagName_scraper_ofdl
+                        }
+                        $tagIDsToAdd = @($stashTagID_scraper_ofdl)
 
                         # Post type tags
                         if($postType -eq "Messages") {
