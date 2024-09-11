@@ -1353,31 +1353,59 @@ function Add-MetadataUsingOFDB{
                                     exit
                                 }
                             }
+
+                            # Check for an affiliated gallery that has already been created
+                            $StashGQL_Query = 'query FindPostGallery($filter: FindFilterType, $gallery_filter: GalleryFilterType) {
+                                findGalleries(filter: $filter, gallery_filter: $gallery_filter) {
+                                    galleries { id }
+                                }
+                            }'
+                            $StashGQL_QueryVariables = '{
+                                "filter": {
+                                  "q": ""
+                                },
+                                "gallery_filter": {
+                                  "code": {
+                                    "value": "'+$postID+'",
+                                    "modifier": "EQUALS"
+                                  }
+                                }
+                              }'
+                            try{
+                                $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+                            }
+                            catch{
+                                write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+                                write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                read-host "Press [Enter] to exit"
+                                exit
+                            }
+                            $postGalleryID = $StashGQL_Result.data.findGalleries.galleries[0].id
     
                             #If it's necessary, update the scene by modifying the title and adding details
                             if($CurrentFileTitle -ne $proposedtitle -or $ignorehistory -eq $true){
                                 $StashGQL_Query = 'mutation sceneUpdate($sceneUpdateInput: SceneUpdateInput!){
                                     sceneUpdate(input: $sceneUpdateInput){
-                                      id
-                                      title
-                                      date
-                                      studio {
-                                        id
-                                      }
-                                      details
-                                      urls
                                       code
+                                      date
+                                      details
+                                      galleries { id }
+                                      id
+                                      studio { id }
+                                      title
+                                      urls
                                     }
                                   }'  
                                 $StashGQL_QueryVariables = '{
                                     "sceneUpdateInput": {
-                                        "id": "'+$CurrentFileID+'",
-                                        "title": "'+$proposedtitle+'",
+                                        "code": "'+$mediaID+'",
                                         "date": "'+$creationdatefromOF+'",
-                                        "studio_id": "'+$OnlyFansStudioID+'",
                                         "details": "'+$detailsToAddToStash+'",
+                                        "gallery_ids": ['+$postGalleryID+'],
+                                        "id": "'+$CurrentFileID+'",
+                                        "studio_id": "'+$OnlyFansStudioID+'",
+                                        "title": "'+$proposedtitle+'",
                                         "urls": "'+$linktoOFpost+'",
-                                        "code": "'+$mediaID+'"
                                     }
                                 }'
     
