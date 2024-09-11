@@ -1043,7 +1043,7 @@ function Add-MetadataUsingOFDB{
              
             if (!(DatabaseHasAlreadyBeenImported)){
                 #Select all the media (except audio) and the text the performer associated to them, if available from the OFDB
-                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
+                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, posts.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
                 $OF_DBpath = $currentdatabase.fullname 
                 $OFDBQueryResult = Invoke-SqliteQuery -Query $Query -DataSource $OF_DBpath
 
@@ -1473,62 +1473,149 @@ function Add-MetadataUsingOFDB{
                                 }
                                 
                             }
+
+                            # ------------------------- Create or add to gallery ------------------------- #
+
+                            # Check if a gallery has already been created
+                            $StashGQL_Query = 'query FindPostGallery($filter: FindFilterType, $gallery_filter: GalleryFilterType) {
+                                findGalleries(filter: $filter, gallery_filter: $gallery_filter) {
+                                    galleries { id }
+                                }
+                            }'
+                            $StashGQL_QueryVariables = '{
+                                "filter": {
+                                  "q": ""
+                                },
+                                "gallery_filter": {
+                                  "code": {
+                                    "value": "'+$postID+'",
+                                    "modifier": "EQUALS"
+                                  }
+                                }
+                              }'
+                            try{
+                                $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+                            }
+                            catch{
+                                write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+                                write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                read-host "Press [Enter] to exit"
+                                exit
+                            }
+                            $postGalleryID = $StashGQL_Result.data.findGalleries.galleries[0].id
+
+                            # If no gallery exists, create one
+                            if($null -eq $postGalleryID) {
+                                $postGalleryTitle = "$performername | $postID"
+                                $StashGQL_Query = 'mutation PostGalleryCreate($input: GalleryCreateInput!) {
+                                    galleryCreate(input: $input) {
+                                        code
+                                        date
+                                        details
+                                        studio { id }
+                                        title
+                                        urls
+                                    }
+                                }'
+                                $StashGQL_QueryVariables = '{
+                                    "input": {
+                                        "code": "'+$postID+'",
+                                        "date": "'+$creationdatefromOF+'",
+                                        "details": "'+$detailsToAddToStash+'",
+                                        "studio_id": "'+$OnlyFansStudioID+'",
+                                        "title": "'+$postGalleryTitle+'",
+                                        "urls": "'+$linktoOFpost+'",
+                                    }    
+                                }'
+                                try{
+                                    Invoke-GraphQLQuery -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -escapehandling EscapeNonAscii | out-null
+                                }
+                                catch{
+                                    write-host "(8) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+                                    write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                    read-host "Press [Enter] to exit" 
+                                    exit
+                                }
+                                $StashGQL_Query = 'query FindPostGallery($filter: FindFilterType, $gallery_filter: GalleryFilterType) {
+                                    findGalleries(filter: $filter, gallery_filter: $gallery_filter) {
+                                        galleries { id }
+                                    }
+                                }'
+                                $StashGQL_QueryVariables = '{
+                                    "filter": {
+                                      "q": ""
+                                    },
+                                    "gallery_filter": {
+                                      "code": {
+                                        "value": "'+$postID+'",
+                                        "modifier": "EQUALS"
+                                      }
+                                    }
+                                  }'
+                                try{
+                                    $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+                                }
+                                catch{
+                                    write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+                                    write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                    read-host "Press [Enter] to exit"
+                                    exit
+                                }
+                                $postGalleryID = $StashGQL_Result.data.findGalleries.galleries[0].id    
+                            }
     
                             #If it's necessary, update the image by modifying the title and adding details
                             if($CurrentFileTitle -ne $proposedtitle -or $ignorehistory -eq $true){
                                 if ($boolSetImageDetails -eq $true){
                                     $StashGQL_Query = 'mutation imageUpdate($imageUpdateInput: ImageUpdateInput!){
                                         imageUpdate(input: $imageUpdateInput){
-                                          id
-                                          title
-                                          date
-                                          studio {
-                                            id
-                                          }
-                                          urls
-                                          details
                                           code
+                                          date
+                                          details
+                                          id
+                                          studio { id }
+                                          title
+                                          urls
                                         }
                                       }'  
     
                                     $StashGQL_QueryVariables = '{
                                         "imageUpdateInput": {
-                                            "id": "'+$CurrentFileID+'",
-                                            "title": "'+$proposedtitle+'",
+                                            "code": "'+$mediaID+'",
                                             "date": "'+$creationdatefromOF+'",
-                                            "studio_id": "'+$OnlyFansStudioID+'",
                                             "details": "'+$detailsToAddToStash+'",
+                                            "gallery_ids": ["'+$postGalleryID+'"],
+                                            "id": "'+$CurrentFileID+'",
+                                            "studio_id": "'+$OnlyFansStudioID+'",
+                                            "title": "'+$proposedtitle+'",
                                             "urls": "'+$linktoOFpost+'",
-                                            "code": "'+$mediaID+'"
                                         }
                                     }'
                                 }
                                 else{
                                     $StashGQL_Query = 'mutation imageUpdate($imageUpdateInput: ImageUpdateInput!){
                                         imageUpdate(input: $imageUpdateInput){
-                                          id
-                                          title
-                                          date
-                                          studio {
-                                            id
-                                          }
-                                          urls
                                           code
+                                          date
+                                          id
+                                          studio { id }
+                                          title
+                                          urls
                                         }
                                       }'  
     
                                     $StashGQL_QueryVariables = '{
                                         "imageUpdateInput": {
-                                            "id": "'+$CurrentFileID+'",
-                                            "title": "'+$proposedtitle+'",
+                                            "code": "'+$mediaID+'",
                                             "date": "'+$creationdatefromOF+'",
+                                            "gallery_ids": ["'+$postGalleryID+'"],
+                                            "id": "'+$CurrentFileID+'",
                                             "studio_id": "'+$OnlyFansStudioID+'",
+                                            "title": "'+$proposedtitle+'",
                                             "urls": "'+$linktoOFpost+'",
-                                            "code": "'+$mediaID+'"
                                         }
                                     }'
                                 }
-                                
                                 
                                 try{
                                     Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
