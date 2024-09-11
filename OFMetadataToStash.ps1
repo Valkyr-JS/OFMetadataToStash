@@ -543,7 +543,38 @@ function Add-MetadataUsingOFDB{
     $nummissingfiles = 0
     $scriptStartTime = get-date
 
-    #Getting the OnlyFans Studio ID or creating it if it does not exist.
+    # --------------------------- Fetch FansDB API key --------------------------- #
+
+    $FansDbGQL_URL = "https://fansdb.cc/graphql"
+
+    # Fetch FansDB API key from the local Stash config
+    $StashGQL_FansDBApiQuery = '
+    query {
+        configuration {
+            general {
+                stashBoxes {
+                    endpoint
+                    api_key
+                }
+            }
+        }
+    }' 
+    try{
+        $StashGQL_FansDBApiResult = Invoke-GraphQLQuery -Query $StashGQL_FansDBApiQuery -Uri $StashGQL_URL -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+    }
+    catch{
+        write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+        write-host "Additional Error Info: `n`n$StashGQL_FansDBApiQuery"
+        read-host "Press [Enter] to exit"
+        exit
+    }
+    $FansDbGQL_ApiKey = ($StashGQL_FansDBApiResult.data.configuration.general.stashBoxes | where-object { $_.endpoint -eq $FansDbGQL_URL }).api_key
+
+    # ------------------------- Get the OF network studio ------------------------ #
+
+    $networkStudioName = "OnlyFans (network)"
+
+    #Get the OnlyFans Studio ID
     $StashGQL_Query = '
     query FindStudios($filter: FindFilterType, $studio_filter: StudioFilterType) {
         findStudios(filter: $filter, studio_filter: $studio_filter) {
@@ -561,7 +592,7 @@ function Add-MetadataUsingOFDB{
         },
         "studio_filter": {
           "name": {
-            "value": "OnlyFans",
+            "value": "'+$networkStudioName+'",
             "modifier": "EQUALS"
           }
         }
@@ -570,29 +601,62 @@ function Add-MetadataUsingOFDB{
         $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
     }
     catch{
-        write-host "(1) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+        write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
         write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
         read-host "Press [Enter] to exit"
         exit
     }
-    $OnlyFansStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
+    $networkStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
 
-    #If Stash returns with an ID for 'OnlyFans', great. Otherwise, let's create a new studio
-    if ($null -eq $OnlyFansStudioID){
+    #If Stash returns with an ID for 'OnlyFans (network)', great. Otherwise, let's create a new studio
+    if ($null -eq $networkStudioID){
+        $FansDbNetworkName = "OnlyFans (network)"
+
+        # Query FansDB for certain data, most importantly the studio stash ID.
+        $FansDbGQL_Query = 'query {
+            queryStudios(input: { name: "\"'+$FansDbNetworkName+'\"" }) {
+                studios {
+                    id
+                    images { url }
+                    name
+                }
+            }
+        }'
+        try{
+            $FansDbGQL_Result = Invoke-GraphQLQuery -Query $FansDbGQL_Query -Uri $FansDbGQL_URL -Headers @{ApiKey = "$FansDbGQL_ApiKey" }
+        }
+        catch{
+            write-host "Error: There was an issue with the FansDB GraphQL query." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$FansDbGQL_Query `n$FansDbGQL_QueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+    
         $StashGQL_Query = 'mutation StudioCreate($input: StudioCreateInput!) {
             studioCreate(input: $input) {
-              name
-              url
+                aliases
+                details
+                name
+                stash_ids {
+                    endpoint
+                    stash_id
+                }
+                url
             }
-          }'
-
+        }'
         $StashGQL_QueryVariables = '{
             "input": {
-                "name": "OnlyFans",
-                "url": "www.onlyfans.com/"
+                "aliases": "OnlyFans",
+                "details": "OnlyFans is the 18+ subscription platform empowering creators to own their full potential, monetize their content, and develop authentic connections with their fans.",
+                "image": "'+$FansDbGQL_Result.data.queryStudios.studios[0].images[0].url+'",
+                "name": "'+$networkStudioName+'",
+                "stash_ids": [{
+                    "endpoint": "'+$FansDbGQL_URL+'",
+                    "stash_id": "'+$FansDbGQL_Result.data.queryStudios.studios[0].id+'"
+                }],
+                "url": "https://onlyfans.com/"
             }    
         }'
-
         try{
             $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
         }
@@ -611,12 +675,148 @@ function Add-MetadataUsingOFDB{
                     name
                 }
             }
-        }
-        ' 
+        }'
         $StashGQL_QueryVariables = '{
-        "filter": {
-            "q": "OnlyFans"
+            "filter": {
+                "q": "'+$networkStudioName+'"
+            }
+        }'
+        try{
+            $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
         }
+        catch{
+            write-host "(9a) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+
+        $networkStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
+        write-host "`nInfo: Added the 'OnlyFans (network)' studio to Stash's database." -ForegroundColor Cyan
+    }
+
+    # ----------------------------- Create the studio ---------------------------- #
+
+    # Check if the studio exists
+    $OnlyFansStudioName = "$performername (OnlyFans)"
+
+    $StashGQL_Query = '
+    query FindStudios($filter: FindFilterType, $studio_filter: StudioFilterType) {
+        findStudios(filter: $filter, studio_filter: $studio_filter) {
+            count
+            studios {
+                id
+                name
+            }
+        }
+    }
+    ' 
+    $StashGQL_QueryVariables = '{
+        "filter": {
+          "q": ""
+        },
+        "studio_filter": {
+          "name": {
+            "value": "'+$OnlyFansStudioName+'",
+            "modifier": "EQUALS"
+          }
+        }
+      }'
+    try{
+        $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+    }
+    catch{
+        write-host "(1) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+        write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+        read-host "Press [Enter] to exit"
+        exit
+    }
+    $OnlyFansStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
+
+    #If Stash returns with an ID for the page, great. Otherwise, let's create a new studio
+    if ($null -eq $OnlyFansStudioID){
+        # Get data from FansDB
+        $FansDbStudioName = "$performername (OnlyFans)"
+
+        # Query FansDB for certain data, most importantly the studio stash ID.
+        $FansDbGQL_Query = 'query {
+                queryStudios(input: { name: "\"'+$FansDbStudioName+'\"" }) {
+                    studios {
+                        id
+                        name
+                        urls {
+                            url
+                        }
+                    }
+                }
+            }'
+        try{
+            $FansDbGQL_Result = Invoke-GraphQLQuery -Query $FansDbGQL_Query -Uri $FansDbGQL_URL -Headers @{ApiKey = "$FansDbGQL_ApiKey" }
+        }
+        catch{
+            write-host "Error: There was an issue with the FansDB GraphQL query." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$FansDbGQL_Query `n$FansDbGQL_QueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+        
+        # Create the studio
+        $StashGQL_Query = 'mutation StudioCreate($input: StudioCreateInput!) {
+            studioCreate(input: $input) {
+                aliases
+                name
+                stash_ids {
+                    endpoint
+                    stash_id
+                }
+                url
+            }
+        }'
+
+        # Format the URL for consistency
+        $OnlyFansStudioURL = [string]$FansDbGQL_Result.data.queryStudios.studios[0].urls[0].url
+        if($null -ne $OnlyFansStudioURL -and $OnlyFansStudioURL.Substring($OnlyFansStudioURL.Length - 1) -ne "/") {
+            $OnlyFansStudioURL += "/"
+        }
+
+        $StashGQL_QueryVariables = '{
+            "input": {
+                "aliases": ["'+$performername+'"],
+                "name": "'+$OnlyFansStudioName+'",
+                "parent_id": '+$networkStudioID+',
+                "stash_ids": [{
+                    "endpoint": "'+$FansDbGQL_URL+'",
+                    "stash_id": "'+$FansDbGQL_Result.data.queryStudios.studios[0].id+'"
+                }],
+                "url": "'+$OnlyFansStudioURL+'",
+            }    
+        }'
+
+        try{
+            $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+        }
+        catch{
+            write-host "(9) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+
+        # Query the local Stash instance again to fetch the newly created studios ID.
+        $StashGQL_Query = '
+        query FindStudios($filter: FindFilterType, $studio_filter: StudioFilterType) {
+            findStudios(filter: $filter, studio_filter: $studio_filter) {
+                count
+                studios {
+                    id
+                    name
+                }
+            }
+        }' 
+        $StashGQL_QueryVariables = '{
+            "filter": {
+                "q": "'+$OnlyFansStudioName+'"
+            }
         }'
         try{
             $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
@@ -629,8 +829,7 @@ function Add-MetadataUsingOFDB{
         }
 
         $OnlyFansStudioID = $StashGQL_Result.data.findStudios.Studios[0].id
-        write-host "`nInfo: Added the OnlyFans studio to Stash's database" -ForegroundColor Cyan
-        
+        write-host "`nInfo: Added the studio '$OnlyFansStudioName' to Stash's database" -ForegroundColor Cyan
     }
 
     function Get-StashMetaTagID {
@@ -831,13 +1030,11 @@ function Add-MetadataUsingOFDB{
                     exit
                 }
                 $PerformerID = $StashGQL_Result.data.findPerformers.performers[0].id
-                $creatednewperformer = $true #We'll use this later after images have been added in order to give the performer a profile picture
                 $boolGetPerformerImage = $true #We'll use this to get an image to use for the profile picture
                 
                 
             }
             else{
-                $creatednewperformer = $false 
                 $boolGetPerformerImage = $false
             }
 
@@ -1370,7 +1567,7 @@ function Add-MetadataUsingOFDB{
                         $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
 
                         $stashTagName_postType_message = "[Meta] post type: message"
-                        $stashTagName_postType_story = "[Meta] post type: wall post"
+                        $stashTagName_postType_story = "[Meta] post type: story"
                         $stashTagName_postType_wallPost = "[Meta] post type: wall post"
                         $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
                         $stashTagID_postType_story = Get-StashMetaTagID -stashTagName $stashTagName_postType_story
@@ -1474,145 +1671,6 @@ function Add-MetadataUsingOFDB{
                                 read-host "Press [Enter] to exit"
                                 exit
                             }
-                        }
-                    }
-                }
-            }
-     
-            #Before we move on, if we had created a new performer, let's update that performer with a profile image.
-            #The only reason we don't do it earlier is that now all the images have been added and associated and it's easy to select an image and go.
-            if($creatednewperformer){
-                
-                #First let's look for an image where this performer has been associated and get the URL, for that image
-                #Sometimes these OF downloaders pull profile/avatar photos into a specific folder. We'll look to see if we can match on that first before just choosing what we can get.
-
-                #Using the filepath of the metadata database as our starting point, we'll go a folder up and then look for an image containing the keyword "avatar"
-                $pathToAvatarImage = (get-item $currentdatabase.FullName)
-                $pathToAvatarImage = split-path -parent $pathToAvatarImage
-                $pathToAvatarImage = split-path -parent $pathToAvatarImage
-                $pathToAvatarImage = "$pathToAvatarImage"+"$directorydelimiter"+"Profile"
-
-                
-                #If there's a profile folder to look into, let's do it (unless the flag to just randomize the profile picture is there)
-                if(!($randomavatar) -and (test-path $pathToAvatarImage)){
-                    $avatarfolder = "$pathToAvatarImage"+"$directorydelimiter"+"Avatars"
-                    $profileimagesfolder = "$pathToAvatarImage"+"$directorydelimiter"+"images"
-
-                    if(test-path $avatarfolder){
-                        $pathToAvatarImage =  Get-ChildItem $avatarfolder | where-object{ $_.extension -in ".jpg", ".jpeg"}
-                        $pathToAvatarImage = $pathToAvatarImage
-                    }
-                    elseif (test-path $profileimagesfolder){
-                        $pathToAvatarImage =  Get-ChildItem $profileimagesfolder | where-object{ $_.extension -in ".jpg", ".jpeg"}
-                        $pathToAvatarImage = $pathToAvatarImage
-                    }
-                    #otherwise, let's just take whatever image we can get
-                    else{
-                        $pathToAvatarImage = Get-ChildItem $pathToAvatarImage -recurse | where-object{ $_.extension -in ".jpg", ".jpeg"}
-                    }
-            
-                    #Convert the image to base64. Note that this is designed for jpegs-- I don't think OnlyFans supports anything else anyway.
-                    $avatarImageBase64 = [convert]::ToBase64String((Get-Content $pathToAvatarImage -AsByteStream))
-                    $avatarImageBase64 = "data:image/jpeg;base64,"+$avatarImageBase64
-
-                    $UpdatePerformerImage_GQLQuery ='mutation PerformerUpdate($input: PerformerUpdateInput!) {
-                        performerUpdate(input: $input) {
-                        id
-                        }
-                    }'
-                    $UpdatePerformerImage_GQLVariables = '{
-                        "input": {
-                        "id": "'+$performerID+'",
-                        "image": "'+$avatarImageBase64+'"
-                        }
-                    }'
-
-                    try{
-                        Invoke-GraphQLQuery -Query $UpdatePerformerImage_GQLQuery -Uri $StashGQL_URL -Variables $UpdatePerformerImage_GQLVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
-                    }
-                    catch{
-                        write-host "(46) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
-                        write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
-                        read-host "Press [Enter] to exit"
-                        exit
-                    }
-                }
-                
-                #If we didn't find anything on the filesystem, let's just query Stash and use a random image from this performer's associated images
-                else{
-                    $performerimageURL_GQLQuery = 'query FindImages(
-                        $filter: FindFilterType
-                        $image_filter: ImageFilterType
-                        $image_ids: [Int!]
-                    ) {
-                        findImages(
-                        filter: $filter,
-                        image_filter: $image_filter,
-                        image_ids: $image_ids){
-                        images{
-                            paths{
-                            image
-                            }
-                        }
-                        }
-                    }'
-    
-                    $performerimageURLVariables_GQLQuery = '
-                    {
-                        "filter": {
-                        "q": "",
-                        "page": 1,
-                        "per_page": 1,
-                        "sort": "date",
-                        "direction": "DESC"
-                        },
-                        "image_filter": {
-                        "performers": {
-                            "value": [
-                            "'+$performerID+'"
-                            ],
-                            "excludes": [],
-                            "modifier": "INCLUDES_ALL"
-                        }
-                        }
-                    }'
-    
-                    try{
-                        $performerimageURL = Invoke-GraphQLQuery -Query $performerimageURL_GQLQuery -Uri $StashGQL_URL -Variables $performerimageURLVariables_GQLQuery -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
-                        
-                    }
-                    catch{
-                        write-host "(11) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
-                        write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
-                        read-host "Press [Enter] to exit"
-                        exit
-                    }
-    
-                    #If there are any Performer images to be used, we update the performer using the URL path.
-                    if ($performerimageURL.data.findimages.images.length -ne 0){
-                        $performerimageURL = $performerimageURL.data.findimages.images.paths.image
-    
-                        
-                        $UpdatePerformerImage_GQLQuery ='mutation PerformerUpdate($input: PerformerUpdateInput!) {
-                            performerUpdate(input: $input) {
-                            id
-                            }
-                        }'
-                        $UpdatePerformerImage_GQLVariables = '{
-                            "input": {
-                            "id": "'+$performerID+'",
-                            "image": "'+$performerimageURL+'"
-                            }
-                        }'
-    
-                        try{
-                            $performerimageURL = Invoke-GraphQLQuery -Query $UpdatePerformerImage_GQLQuery -Uri $StashGQL_URL -Variables $UpdatePerformerImage_GQLVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
-                        }
-                        catch{
-                            write-host "(12) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
-                            write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
-                            read-host "Press [Enter] to exit"
-                            exit
                         }
                     }
                 }
