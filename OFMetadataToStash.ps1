@@ -1512,6 +1512,7 @@ function Add-MetadataUsingOFDB{
                                         code
                                         date
                                         details
+                                        performers { id }
                                         studio { id }
                                         title
                                         urls
@@ -1522,6 +1523,7 @@ function Add-MetadataUsingOFDB{
                                         "code": "'+$postID+'",
                                         "date": "'+$creationdatefromOF+'",
                                         "details": "'+$detailsToAddToStash+'",
+                                        "performer_ids": ['+$PerformerID+'],
                                         "studio_id": "'+$OnlyFansStudioID+'",
                                         "title": "'+$postGalleryTitle+'",
                                         "urls": "'+$linktoOFpost+'",
