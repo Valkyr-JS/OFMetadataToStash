@@ -1506,13 +1506,42 @@ function Add-MetadataUsingOFDB{
 
                             # If no gallery exists, create one
                             if($null -eq $postGalleryID) {
+                                # Check for affiliated scenes that have already been created
+                                $StashGQL_Query = 'query FindPostScenes($filter: FindFilterType, $scene_filter: SceneFilterType) {
+                                    findScenes(filter: $filter, scene_filter: $scene_filter) {
+                                        scenes { id }
+                                    }
+                                }'
+                                $StashGQL_QueryVariables = '{
+                                    "filter": {
+                                      "q": ""
+                                    },
+                                    "scene_filter": {
+                                      "title": {
+                                        "value": "\"| '+$postID+'\"",
+                                        "modifier": "INCLUDES"
+                                      }
+                                    }
+                                  }'
+                                try{
+                                    $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+                                }
+                                catch{
+                                    write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+                                    write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                    read-host "Press [Enter] to exit"
+                                    exit
+                                }
+
                                 $postGalleryTitle = "$performername | $postID"
+                                $postGalleryScenes = $StashGQL_Result.data.findScenes.scenes.id
                                 $StashGQL_Query = 'mutation PostGalleryCreate($input: GalleryCreateInput!) {
                                     galleryCreate(input: $input) {
                                         code
                                         date
                                         details
                                         performers { id }
+                                        scenes { id }
                                         studio { id }
                                         title
                                         urls
@@ -1524,6 +1553,7 @@ function Add-MetadataUsingOFDB{
                                         "date": "'+$creationdatefromOF+'",
                                         "details": "'+$detailsToAddToStash+'",
                                         "performer_ids": ['+$PerformerID+'],
+                                        "scene_ids": ['+($postGalleryScenes -join ",")+'],
                                         "studio_id": "'+$OnlyFansStudioID+'",
                                         "title": "'+$postGalleryTitle+'",
                                         "urls": "'+$linktoOFpost+'",
