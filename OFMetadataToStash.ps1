@@ -617,6 +617,7 @@ function Add-MetadataUsingOFDB{
             queryStudios(input: { name: "\"'+$FansDbNetworkName+'\"" }) {
                 studios {
                     id
+                    images { url }
                     name
                 }
             }
@@ -634,6 +635,7 @@ function Add-MetadataUsingOFDB{
         $StashGQL_Query = 'mutation StudioCreate($input: StudioCreateInput!) {
             studioCreate(input: $input) {
                 aliases
+                details
                 name
                 stash_ids {
                     endpoint
@@ -645,6 +647,8 @@ function Add-MetadataUsingOFDB{
         $StashGQL_QueryVariables = '{
             "input": {
                 "aliases": "OnlyFans",
+                "details": "OnlyFans is the 18+ subscription platform empowering creators to own their full potential, monetize their content, and develop authentic connections with their fans.",
+                "image": "'+$FansDbGQL_Result.data.queryStudios.studios[0].images[0].url+'",
                 "name": "'+$networkStudioName+'",
                 "stash_ids": [{
                     "endpoint": "'+$FansDbGQL_URL+'",
