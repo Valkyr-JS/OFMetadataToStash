@@ -1567,7 +1567,7 @@ function Add-MetadataUsingOFDB{
                         $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
 
                         $stashTagName_postType_message = "[Meta] post type: message"
-                        $stashTagName_postType_story = "[Meta] post type: wall post"
+                        $stashTagName_postType_story = "[Meta] post type: story"
                         $stashTagName_postType_wallPost = "[Meta] post type: wall post"
                         $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
                         $stashTagID_postType_story = Get-StashMetaTagID -stashTagName $stashTagName_postType_story
