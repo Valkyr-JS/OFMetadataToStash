@@ -1043,7 +1043,7 @@ function Add-MetadataUsingOFDB{
              
             if (!(DatabaseHasAlreadyBeenImported)){
                 #Select all the media (except audio) and the text the performer associated to them, if available from the OFDB
-                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
+                $Query = "SELECT messages.text, medias.directory, medias.filename, medias.size, medias.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN messages ON messages.post_id=medias.post_id UNION SELECT posts.text, medias.directory, medias.filename, medias.size, posts.created_at, medias.post_id, medias.media_id, medias.api_type, medias.media_type FROM medias INNER JOIN posts ON posts.post_id=medias.post_id WHERE medias.media_type <> 'Audios'"
                 $OF_DBpath = $currentdatabase.fullname 
                 $OFDBQueryResult = Invoke-SqliteQuery -Query $Query -DataSource $OF_DBpath
 
@@ -1353,31 +1353,59 @@ function Add-MetadataUsingOFDB{
                                     exit
                                 }
                             }
+
+                            # Check for an affiliated gallery that has already been created
+                            $StashGQL_Query = 'query FindPostGallery($filter: FindFilterType, $gallery_filter: GalleryFilterType) {
+                                findGalleries(filter: $filter, gallery_filter: $gallery_filter) {
+                                    galleries { id }
+                                }
+                            }'
+                            $StashGQL_QueryVariables = '{
+                                "filter": {
+                                  "q": ""
+                                },
+                                "gallery_filter": {
+                                  "code": {
+                                    "value": "'+$postID+'",
+                                    "modifier": "EQUALS"
+                                  }
+                                }
+                              }'
+                            try{
+                                $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+                            }
+                            catch{
+                                write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+                                write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                read-host "Press [Enter] to exit"
+                                exit
+                            }
+                            $postGalleryID = $StashGQL_Result.data.findGalleries.galleries[0].id
     
                             #If it's necessary, update the scene by modifying the title and adding details
                             if($CurrentFileTitle -ne $proposedtitle -or $ignorehistory -eq $true){
                                 $StashGQL_Query = 'mutation sceneUpdate($sceneUpdateInput: SceneUpdateInput!){
                                     sceneUpdate(input: $sceneUpdateInput){
-                                      id
-                                      title
-                                      date
-                                      studio {
-                                        id
-                                      }
-                                      details
-                                      urls
                                       code
+                                      date
+                                      details
+                                      galleries { id }
+                                      id
+                                      studio { id }
+                                      title
+                                      urls
                                     }
                                   }'  
                                 $StashGQL_QueryVariables = '{
                                     "sceneUpdateInput": {
-                                        "id": "'+$CurrentFileID+'",
-                                        "title": "'+$proposedtitle+'",
+                                        "code": "'+$mediaID+'",
                                         "date": "'+$creationdatefromOF+'",
-                                        "studio_id": "'+$OnlyFansStudioID+'",
                                         "details": "'+$detailsToAddToStash+'",
+                                        "gallery_ids": ['+$postGalleryID+'],
+                                        "id": "'+$CurrentFileID+'",
+                                        "studio_id": "'+$OnlyFansStudioID+'",
+                                        "title": "'+$proposedtitle+'",
                                         "urls": "'+$linktoOFpost+'",
-                                        "code": "'+$mediaID+'"
                                     }
                                 }'
     
@@ -1473,62 +1501,297 @@ function Add-MetadataUsingOFDB{
                                 }
                                 
                             }
+
+                            # ----------------------------- Add metadata tags ---------------------------- #
+
+                            $postType = $OFDBMedia.api_type
+
+                            $stashTagName_availability_archived = "[Meta] availability: archived"
+                            $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
+
+                            $stashTagName_postType_message = "[Meta] post type: message"
+                            $stashTagName_postType_story = "[Meta] post type: story"
+                            $stashTagName_postType_wallPost = "[Meta] post type: wall post"
+                            $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
+                            $stashTagID_postType_story = Get-StashMetaTagID -stashTagName $stashTagName_postType_story
+                            $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName $stashTagName_postType_wallPost
+
+                            $stashTagName_price_free = "[Meta] pricing: free"
+                            $stashTagID_price_free = Get-StashMetaTagID -stashTagName $stashTagName_price_free
+                            $stashTagName_price_paid = "[Meta] pricing: paid"
+                            $stashTagID_price_paid = Get-StashMetaTagID -stashTagName $stashTagName_price_paid
+
+                            $stashTagName_scraper_ofdl = "[Meta] scraper: OFDL"
+                            $stashTagID_scraper_ofdl = Get-StashMetaTagID -stashTagName $stashTagName_scraper_ofdl
+
+                            # Tag everything with an OFDL tag
+                            if($null -eq $stashTagID_scraper_ofdl) {
+                                Set-StashMetaTagID -thisStashTagName $stashTagName_scraper_ofdl
+                                $stashTagID_scraper_ofdl = Get-StashMetaTagID -stashTagName $stashTagName_scraper_ofdl
+                            }
+                            $tagIDsToAdd = @($stashTagID_scraper_ofdl)
+
+                            # Post type tags
+                            if($postType -eq "Messages") {
+                                # Check if the tag ID we got earlier is null. If so, create a new tag.
+                                if($null -eq $stashTagID_postType_message) {
+                                    Set-StashMetaTagID -thisStashTagName $stashTagName_postType_message
+                                    $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
+                                }
+                                $tagIDsToAdd += $stashTagID_postType_message
+                            } elseif($postType -eq "Posts") {
+                                # Check if the tag ID we got earlier is null. If so, create a new tag.
+                                if($null -eq $stashTagID_postType_wallPost) {
+                                    Set-StashMetaTagID -thisStashTagName $stashTagName_postType_wallPost
+                                    $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName $stashTagName_postType_wallPost
+                                }
+                                $tagIDsToAdd += $stashTagID_postType_wallPost
+                            } elseif($postType -eq "Stories") {
+                                # Check if the tag ID we got earlier is null. If so, create a new tag.
+                                if($null -eq $stashTagID_postType_story) {
+                                    Set-StashMetaTagID -thisStashTagName $stashTagName_postType_story
+                                    $stashTagID_postType_story = Get-StashMetaTagID -stashTagName $stashTagName_postType_story
+                                }
+                                $tagIDsToAdd += $stashTagID_postType_story
+                            }
+
+                            # Pricing tags
+                            if($OFDBdirectory.contains("/Free/")) {
+                                # Check if the tag ID we got earlier is null. If so, create a new tag.
+                                if($null -eq $stashTagID_price_free) {
+                                    Set-StashMetaTagID -thisStashTagName $stashTagName_price_free
+                                    $stashTagID_price_free = Get-StashMetaTagID -stashTagName $stashTagName_price_free
+                                }
+                                $tagIDsToAdd += $stashTagID_price_free
+                            } elseif($OFDBdirectory.contains("/Paid/")) {
+                                # Check if the tag ID we got earlier is null. If so, create a new tag.
+                                if($null -eq $stashTagID_price_paid) {
+                                    Set-StashMetaTagID -thisStashTagName $stashTagName_price_paid
+                                    $stashTagID_price_paid = Get-StashMetaTagID -stashTagName $stashTagName_price_paid
+                                }
+                                $tagIDsToAdd += $stashTagID_price_paid
+                            }
+
+                            # Availability tags
+                            if($OFDBdirectory.contains("/Archived/")) {
+                                # Check if the tag ID we got earlier is null. If so, create a new tag.
+                                if($null -eq $stashTagID_availability_archived) {
+                                    Set-StashMetaTagID -thisStashTagName $stashTagName_availability_archived
+                                    $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
+                                }
+                                $tagIDsToAdd += $stashTagID_availability_archived
+                            }
+
+                            # Once we have all the appropriate tags, update the Stash database
+                            if($tagIDsToAdd.count -gt 0) {
+                                if($mediatype -eq "video") {
+                                    $updateType = "sceneUpdate"
+                                    $updateTypeCapped = "SceneUpdate"
+                                } elseif($mediatype -eq "image") {
+                                    $updateType = "imageUpdate"
+                                    $updateTypeCapped = "ImageUpdate"
+                                }
+                                $StashGQL_SceneTagsQuery = 'mutation '+$updateTypeCapped+'($'+$updateType+'Input: '+$updateTypeCapped+'Input!){
+                                    '+$updateType+'(input: $'+$updateType+'Input){
+                                        id
+                                        tags {
+                                            id
+                                        }
+                                    }
+                                }'
+                                $StashGQL_SceneTagsQueryVariables = ' {
+                                    "'+$updateType+'Input": {
+                                        "id": "'+$CurrentFileID+'",
+                                        "tag_ids": ['+($tagIDsToAdd -join ",")+']
+                                    }
+                                }'
+                                try{
+                                    Invoke-GraphQLQuery -Query $StashGQL_SceneTagsQuery -Uri $StashGQL_URL -Variables $StashGQL_SceneTagsQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
+                                }
+                                catch{
+                                    write-host "(7) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+                                    write-host "Additional Error Info: `n`n$StashGQL_SceneTagsQuery `n$StashGQL_SceneTagsQueryVariables"
+                                    read-host "Press [Enter] to exit"
+                                    exit
+                                }
+                            }
+
+                            # ------------------------- Create or add to gallery ------------------------- #
+
+                            # Check if a gallery has already been created
+                            $StashGQL_Query = 'query FindPostGallery($filter: FindFilterType, $gallery_filter: GalleryFilterType) {
+                                findGalleries(filter: $filter, gallery_filter: $gallery_filter) {
+                                    galleries { id }
+                                }
+                            }'
+                            $StashGQL_QueryVariables = '{
+                                "filter": {
+                                  "q": ""
+                                },
+                                "gallery_filter": {
+                                  "code": {
+                                    "value": "'+$postID+'",
+                                    "modifier": "EQUALS"
+                                  }
+                                }
+                              }'
+                            try{
+                                $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+                            }
+                            catch{
+                                write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+                                write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                read-host "Press [Enter] to exit"
+                                exit
+                            }
+                            $postGalleryID = $StashGQL_Result.data.findGalleries.galleries[0].id
+
+                            # If no gallery exists, create one
+                            if($null -eq $postGalleryID) {
+                                # Check for affiliated scenes that have already been created
+                                $StashGQL_Query = 'query FindPostScenes($filter: FindFilterType, $scene_filter: SceneFilterType) {
+                                    findScenes(filter: $filter, scene_filter: $scene_filter) {
+                                        scenes { id }
+                                    }
+                                }'
+                                $StashGQL_QueryVariables = '{
+                                    "filter": {
+                                      "q": ""
+                                    },
+                                    "scene_filter": {
+                                      "title": {
+                                        "value": "\"| '+$postID+'\"",
+                                        "modifier": "INCLUDES"
+                                      }
+                                    }
+                                  }'
+                                try{
+                                    $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+                                }
+                                catch{
+                                    write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+                                    write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                    read-host "Press [Enter] to exit"
+                                    exit
+                                }
+
+                                $postGalleryTitle = "$performername | $postID"
+                                $postGalleryScenes = $StashGQL_Result.data.findScenes.scenes.id
+                                $StashGQL_Query = 'mutation PostGalleryCreate($input: GalleryCreateInput!) {
+                                    galleryCreate(input: $input) {
+                                        code
+                                        date
+                                        details
+                                        performers { id }
+                                        scenes { id }
+                                        studio { id }
+                                        tags { id }
+                                        title
+                                        urls
+                                    }
+                                }'
+                                $StashGQL_QueryVariables = '{
+                                    "input": {
+                                        "code": "'+$postID+'",
+                                        "date": "'+$creationdatefromOF+'",
+                                        "details": "'+$detailsToAddToStash+'",
+                                        "performer_ids": ['+$PerformerID+'],
+                                        "scene_ids": ['+($postGalleryScenes -join ",")+'],
+                                        "studio_id": "'+$OnlyFansStudioID+'",
+                                        "tag_ids": ['+($tagIDsToAdd -join ",")+'],
+                                        "title": "'+$postGalleryTitle+'",
+                                        "urls": "'+$linktoOFpost+'",
+                                    }    
+                                }'
+                                try{
+                                    Invoke-GraphQLQuery -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -escapehandling EscapeNonAscii | out-null
+                                }
+                                catch{
+                                    write-host "(8) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+                                    write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                    read-host "Press [Enter] to exit" 
+                                    exit
+                                }
+                                $StashGQL_Query = 'query FindPostGallery($filter: FindFilterType, $gallery_filter: GalleryFilterType) {
+                                    findGalleries(filter: $filter, gallery_filter: $gallery_filter) {
+                                        galleries { id }
+                                    }
+                                }'
+                                $StashGQL_QueryVariables = '{
+                                    "filter": {
+                                      "q": ""
+                                    },
+                                    "gallery_filter": {
+                                      "code": {
+                                        "value": "'+$postID+'",
+                                        "modifier": "EQUALS"
+                                      }
+                                    }
+                                  }'
+                                try{
+                                    $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+                                }
+                                catch{
+                                    write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+                                    write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+                                    read-host "Press [Enter] to exit"
+                                    exit
+                                }
+                                $postGalleryID = $StashGQL_Result.data.findGalleries.galleries[0].id    
+                            }
     
                             #If it's necessary, update the image by modifying the title and adding details
                             if($CurrentFileTitle -ne $proposedtitle -or $ignorehistory -eq $true){
                                 if ($boolSetImageDetails -eq $true){
                                     $StashGQL_Query = 'mutation imageUpdate($imageUpdateInput: ImageUpdateInput!){
                                         imageUpdate(input: $imageUpdateInput){
-                                          id
-                                          title
-                                          date
-                                          studio {
-                                            id
-                                          }
-                                          urls
-                                          details
                                           code
+                                          date
+                                          details
+                                          id
+                                          studio { id }
+                                          title
+                                          urls
                                         }
                                       }'  
     
                                     $StashGQL_QueryVariables = '{
                                         "imageUpdateInput": {
-                                            "id": "'+$CurrentFileID+'",
-                                            "title": "'+$proposedtitle+'",
+                                            "code": "'+$mediaID+'",
                                             "date": "'+$creationdatefromOF+'",
-                                            "studio_id": "'+$OnlyFansStudioID+'",
                                             "details": "'+$detailsToAddToStash+'",
+                                            "gallery_ids": ["'+$postGalleryID+'"],
+                                            "id": "'+$CurrentFileID+'",
+                                            "studio_id": "'+$OnlyFansStudioID+'",
+                                            "title": "'+$proposedtitle+'",
                                             "urls": "'+$linktoOFpost+'",
-                                            "code": "'+$mediaID+'"
                                         }
                                     }'
                                 }
                                 else{
                                     $StashGQL_Query = 'mutation imageUpdate($imageUpdateInput: ImageUpdateInput!){
                                         imageUpdate(input: $imageUpdateInput){
-                                          id
-                                          title
-                                          date
-                                          studio {
-                                            id
-                                          }
-                                          urls
                                           code
+                                          date
+                                          id
+                                          studio { id }
+                                          title
+                                          urls
                                         }
                                       }'  
     
                                     $StashGQL_QueryVariables = '{
                                         "imageUpdateInput": {
-                                            "id": "'+$CurrentFileID+'",
-                                            "title": "'+$proposedtitle+'",
+                                            "code": "'+$mediaID+'",
                                             "date": "'+$creationdatefromOF+'",
+                                            "gallery_ids": ["'+$postGalleryID+'"],
+                                            "id": "'+$CurrentFileID+'",
                                             "studio_id": "'+$OnlyFansStudioID+'",
+                                            "title": "'+$proposedtitle+'",
                                             "urls": "'+$linktoOFpost+'",
-                                            "code": "'+$mediaID+'"
                                         }
                                     }'
                                 }
-                                
                                 
                                 try{
                                     Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
@@ -1557,121 +1820,6 @@ function Add-MetadataUsingOFDB{
                                 $numUnmodified++
                             }
                         } 
-
-
-                        # ----------------------------- Add metadata tags ---------------------------- #
-
-                        $postType = $OFDBMedia.api_type
-
-                        $stashTagName_availability_archived = "[Meta] availability: archived"
-                        $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
-
-                        $stashTagName_postType_message = "[Meta] post type: message"
-                        $stashTagName_postType_story = "[Meta] post type: story"
-                        $stashTagName_postType_wallPost = "[Meta] post type: wall post"
-                        $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
-                        $stashTagID_postType_story = Get-StashMetaTagID -stashTagName $stashTagName_postType_story
-                        $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName $stashTagName_postType_wallPost
-
-                        $stashTagName_price_free = "[Meta] pricing: free"
-                        $stashTagID_price_free = Get-StashMetaTagID -stashTagName $stashTagName_price_free
-                        $stashTagName_price_paid = "[Meta] pricing: paid"
-                        $stashTagID_price_paid = Get-StashMetaTagID -stashTagName $stashTagName_price_paid
-
-                        $stashTagName_scraper_ofdl = "[Meta] scraper: OFDL"
-                        $stashTagID_scraper_ofdl = Get-StashMetaTagID -stashTagName $stashTagName_scraper_ofdl
-
-                        # Tag everything with an OFDL tag
-                        if($null -eq $stashTagID_scraper_ofdl) {
-                            Set-StashMetaTagID -thisStashTagName $stashTagName_scraper_ofdl
-                            $stashTagID_scraper_ofdl = Get-StashMetaTagID -stashTagName $stashTagName_scraper_ofdl
-                        }
-                        $tagIDsToAdd = @($stashTagID_scraper_ofdl)
-
-                        # Post type tags
-                        if($postType -eq "Messages") {
-                            # Check if the tag ID we got earlier is null. If so, create a new tag.
-                            if($null -eq $stashTagID_postType_message) {
-                                Set-StashMetaTagID -thisStashTagName $stashTagName_postType_message
-                                $stashTagID_postType_message = Get-StashMetaTagID -stashTagName $stashTagName_postType_message
-                            }
-                            $tagIDsToAdd += $stashTagID_postType_message
-                        } elseif($postType -eq "Posts") {
-                            # Check if the tag ID we got earlier is null. If so, create a new tag.
-                            if($null -eq $stashTagID_postType_wallPost) {
-                                Set-StashMetaTagID -thisStashTagName $stashTagName_postType_wallPost
-                                $stashTagID_postType_wallPost = Get-StashMetaTagID -stashTagName $stashTagName_postType_wallPost
-                            }
-                            $tagIDsToAdd += $stashTagID_postType_wallPost
-                        } elseif($postType -eq "Stories") {
-                            # Check if the tag ID we got earlier is null. If so, create a new tag.
-                            if($null -eq $stashTagID_postType_story) {
-                                Set-StashMetaTagID -thisStashTagName $stashTagName_postType_story
-                                $stashTagID_postType_story = Get-StashMetaTagID -stashTagName $stashTagName_postType_story
-                            }
-                            $tagIDsToAdd += $stashTagID_postType_story
-                        }
-
-                        # Pricing tags
-                        if($OFDBdirectory.contains("/Free/")) {
-                            # Check if the tag ID we got earlier is null. If so, create a new tag.
-                            if($null -eq $stashTagID_price_free) {
-                                Set-StashMetaTagID -thisStashTagName $stashTagName_price_free
-                                $stashTagID_price_free = Get-StashMetaTagID -stashTagName $stashTagName_price_free
-                            }
-                            $tagIDsToAdd += $stashTagID_price_free
-                        } elseif($OFDBdirectory.contains("/Paid/")) {
-                            # Check if the tag ID we got earlier is null. If so, create a new tag.
-                            if($null -eq $stashTagID_price_paid) {
-                                Set-StashMetaTagID -thisStashTagName $stashTagName_price_paid
-                                $stashTagID_price_paid = Get-StashMetaTagID -stashTagName $stashTagName_price_paid
-                            }
-                            $tagIDsToAdd += $stashTagID_price_paid
-                        }
-
-                        # Availability tags
-                        if($OFDBdirectory.contains("/Archived/")) {
-                            # Check if the tag ID we got earlier is null. If so, create a new tag.
-                            if($null -eq $stashTagID_availability_archived) {
-                                Set-StashMetaTagID -thisStashTagName $stashTagName_availability_archived
-                                $stashTagID_availability_archived = Get-StashMetaTagID -stashTagName $stashTagName_availability_archived
-                            }
-                            $tagIDsToAdd += $stashTagID_availability_archived
-                        }
-
-                        # Once we have all the appropriate tags, update the Stash database
-                        if($tagIDsToAdd.count -gt 0) {
-                            if($mediatype -eq "video") {
-                                $updateType = "sceneUpdate"
-                                $updateTypeCapped = "SceneUpdate"
-                            } elseif($mediatype -eq "image") {
-                                $updateType = "imageUpdate"
-                                $updateTypeCapped = "ImageUpdate"
-                            }
-                            $StashGQL_SceneTagsQuery = 'mutation '+$updateTypeCapped+'($'+$updateType+'Input: '+$updateTypeCapped+'Input!){
-                                '+$updateType+'(input: $'+$updateType+'Input){
-                                    id
-                                    tags {
-                                        id
-                                    }
-                                }
-                            }'
-                            $StashGQL_SceneTagsQueryVariables = ' {
-                                "'+$updateType+'Input": {
-                                    "id": "'+$CurrentFileID+'",
-                                    "tag_ids": ['+($tagIDsToAdd -join ",")+']
-                                }
-                            }'
-                            try{
-                                Invoke-GraphQLQuery -Query $StashGQL_SceneTagsQuery -Uri $StashGQL_URL -Variables $StashGQL_SceneTagsQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
-                            }
-                            catch{
-                                write-host "(7) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
-                                write-host "Additional Error Info: `n`n$StashGQL_SceneTagsQuery `n$StashGQL_SceneTagsQueryVariables"
-                                read-host "Press [Enter] to exit"
-                                exit
-                            }
-                        }
                     }
                 }
             }
