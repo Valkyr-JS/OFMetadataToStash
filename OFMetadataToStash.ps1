@@ -1826,6 +1826,107 @@ function Add-MetadataUsingOFDB{
         }
     }
 
+    # ------------------------------ Profile images ------------------------------ #
+
+    # Profile headers and avatars are not included in the database. Let's find them now.
+    $StashGQL_Query = 'query FindProfileImages($filter: FindFilterType, $avatar_filter: ImageFilterType, $header_filter: ImageFilterType) {
+        findAvatars: findImages(filter: $filter, image_filter: $avatar_filter) {
+            images {
+                id
+                visual_files { ...on ImageFile { path } }
+            }
+        }
+        findHeaders: findImages(filter: $filter, image_filter: $header_filter) {
+            images {
+                id
+                visual_files { ...on ImageFile { path } }
+            }
+        }
+    }'
+    $StashGQL_QueryVariables = '{
+        "filter": {
+            "q": ""
+        },
+        "avatar_filter": {
+            "path": {
+                "value": "/anna.ralphs/Profile/Avatars/",
+                "modifier": "INCLUDES"
+            }
+        },
+        "header_filter": {
+            "path": {
+                "value": "/anna.ralphs/Profile/Headers/",
+                "modifier": "INCLUDES"
+            }
+        }
+    }'
+    try{
+        $StashGQL_Result = Invoke-GraphQLQuery -Query $StashGQL_Query -Uri $StashGQL_URL -Variables $StashGQL_QueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }})
+    }
+    catch{
+        write-host "(1) Error: There was an issue with the GraphQL query." -ForegroundColor red
+        write-host "Additional Error Info: `n`n$StashGQL_Query `n$StashGQL_QueryVariables"
+        read-host "Press [Enter] to exit"
+        exit
+    }
+    $avatars = $StashGQL_Result.data.findAvatars.images
+    $headers = $StashGQL_Result.data.findHeaders.images
+
+    # Add metadata tags to all
+    $tagIDsToAdd = @($stashTagID_scraper_ofdl)
+
+    foreach ($avatar in $avatars) {
+        $StashGQL_SceneTagsQuery = 'mutation ImageUpdate($imageUpdateInput: ImageUpdateInput!){
+            imageUpdate(input: $imageUpdateInput){
+                id
+                tags {
+                    id
+                }
+            }
+        }'
+        $StashGQL_SceneTagsQueryVariables = ' {
+            "imageUpdateInput": {
+                "id": "'+$avatar.id+'",
+                "tag_ids": ['+($tagIDsToAdd -join ",")+']
+            }
+        }'
+        try{
+            Invoke-GraphQLQuery -Query $StashGQL_SceneTagsQuery -Uri $StashGQL_URL -Variables $StashGQL_SceneTagsQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
+        }
+        catch{
+            write-host "(7) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_SceneTagsQuery `n$StashGQL_SceneTagsQueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+    }
+
+    foreach ($header in $headers) {
+        $StashGQL_SceneTagsQuery = 'mutation ImageUpdate($imageUpdateInput: ImageUpdateInput!){
+            imageUpdate(input: $imageUpdateInput){
+                id
+                tags {
+                    id
+                }
+            }
+        }'
+        $StashGQL_SceneTagsQueryVariables = ' {
+            "imageUpdateInput": {
+                "id": "'+$header.id+'",
+                "tag_ids": ['+($tagIDsToAdd -join ",")+']
+            }
+        }'
+        try{
+            Invoke-GraphQLQuery -Query $StashGQL_SceneTagsQuery -Uri $StashGQL_URL -Variables $StashGQL_SceneTagsQueryVariables -Headers $(if ($StashAPIKey){ @{ApiKey = "$StashAPIKey" }}) | out-null
+        }
+        catch{
+            write-host "(7) Error: There was an issue with the GraphQL query/mutation." -ForegroundColor red
+            write-host "Additional Error Info: `n`n$StashGQL_SceneTagsQuery `n$StashGQL_SceneTagsQueryVariables"
+            read-host "Press [Enter] to exit"
+            exit
+        }
+    }
+
     ## Finished scan, let's let the user know what the results were
     
     if ($nummissingfiles -gt 0){
